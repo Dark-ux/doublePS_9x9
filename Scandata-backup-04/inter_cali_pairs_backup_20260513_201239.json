@@ -1,0 +1,14 @@
+{
+  "5": {
+    "target": 5,
+    "ports": [
+      11,
+      7
+    ],
+    "upper_arm_voltage": 3.488,
+    "lower_arm_voltage": 3.62,
+    "min_x_power": 0.02576312193902818,
+    "min_dp": 4.93040388826,
+    "min_power_uW": 1.264776
+  }
+}
