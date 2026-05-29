@@ -1,0 +1,32 @@
+{
+  "max_abs_theta": 2.313814741903126,
+  "mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "reference_dir": "Scandata/current_theta_reference",
+  "current_dir": "Scandata\\current_theta_measurement",
+  "valid_theta_count": 8,
+  "failed_mzi_ids": [],
+  "low_visibility_mzi_ids": [
+    5,
+    7,
+    8
+  ],
+  "phase_jump_mzi_ids": [
+    5,
+    6,
+    8
+  ],
+  "strict_phase_jump": false,
+  "visibility_threshold": 0.3,
+  "allow_hardware_update": false,
+  "warnings": [
+    "MZI 5: Delta phase jump may be too large; Delta low visibility",
+    "MZI 6: Delta phase jump may be too large",
+    "MZI 7: Sigma low visibility",
+    "MZI 8: Delta phase jump may be too large; Sigma low visibility"
+  ]
+}

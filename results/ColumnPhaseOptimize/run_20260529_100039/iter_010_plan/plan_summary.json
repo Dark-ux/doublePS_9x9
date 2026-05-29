@@ -1,0 +1,15 @@
+{
+  "max_abs_theta_error_rad": 1.1197904980726072,
+  "norm_theta_error": 1.9686122409255107,
+  "alpha": 0.3,
+  "alpha_used": 0.3,
+  "lambda_reg": 0.0001,
+  "power_limit_w": 0.055,
+  "step_limit_w": 0.002,
+  "condition_number_J": 7.159496387237737,
+  "used_branch_search": false,
+  "warnings": [],
+  "model_output_rmse": 0.13864366206073525,
+  "model_output_mae": 0.05253392774580788,
+  "model_output_max_abs": 0.48622197055459093
+}

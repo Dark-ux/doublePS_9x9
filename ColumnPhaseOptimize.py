@@ -29,7 +29,7 @@ RUN_START_TIME = time.perf_counter()
 
 @dataclass
 class DirectRunConfig:
-    mode: str = "iterate"
+    mode: str = "simulate"
     j_theta: str = "results/J_full/J_theta_rad_per_w.csv"
     mzi_table: str = "Scandata/MZI_table.json"
     mzi_ids: str = "5,6,7,8"
@@ -42,7 +42,9 @@ class DirectRunConfig:
     delta_reference_source_dir: str = "jacobian_measurements/baseline"
     sigma_reference_source_dir: str = "Scandata/J_sigma/baseline"
     sigma_sign_path: str = "Scandata/J_sigma/sign_check/sigma_sign.json"
-    auto_init_current_power_from_bar: bool = True
+    initial_state: str = "voltage_pair"
+    voltage_pair_power: str = "current_power_second_column.csv"
+    auto_init_current_power_from_bar: bool = False
     assume_reference_zero: bool = False
 
     alpha: float = DEFAULT_ALPHA
@@ -53,14 +55,16 @@ class DirectRunConfig:
     voltage_limit_v: float = DEFAULT_VOLTAGE_LIMIT_V
     max_iter: int = DEFAULT_MAX_ITER
     settle_time: float = DEFAULT_SETTLE_TIME
-    dry_run: bool = False
+    dry_run: bool = True
+    confirm_hardware: bool = False
     ser_address: str = "COM3"
     opm2_address: str = DEFAULT_OPM2_ADDRESS
 
     enable_branch_search: bool = False
     branch_candidates: str = "0,1"
     pause_for_manual_theta_update: bool = False
-    auto_measure_current_theta: bool = True
+    auto_measure_current_theta: bool = False
+    theta_update_mode: str = "measured_manual"
     probe_map: str = "5:u,6:u,7:u,8:u"
     probe_half_width_w: float = 0.001
     probe_step_w: float = 0.00025
@@ -73,6 +77,17 @@ class DirectRunConfig:
     enable_line_search: bool = False
     line_search_min_alpha: float = 0.05
     line_search_shrink: float = 0.5
+    strict_phase_jump: bool = False
+    visibility_threshold: float = 0.3
+    scan_profile: str = "fast"
+    sigma_update_interval: int = 2
+    estimated_seconds_per_point: float = 6.5
+    convergence_mode: str = "theta_only"
+    line_search_metric: str = "theta"
+    theta_weight: float = 1.0
+    model_weight: float = 0.2
+    resume: bool = False
+    resume_run_dir: str | None = None
 
 
 DIRECT_RUN_CONFIG = DirectRunConfig()
@@ -82,6 +97,12 @@ def parse_csv_list(text, item_type=str):
     if text is None or str(text).strip() == "":
         return []
     return [item_type(item.strip()) for item in str(text).split(",") if item.strip()]
+
+
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def elapsed_time_text():
@@ -323,7 +344,7 @@ def save_zero_current_theta_csv(path, theta_labels):
     pd.DataFrame({"theta": theta_labels, "value_rad": theta}).to_csv(path, index=False)
     print(
         f"[ColumnPhaseOptimize] created {path} with zero phases. "
-        "This assumes the current hardware state is the theta=0 reference state."
+        "Current theta=0 is defined as the voltage-pair baseline, not absolute physical zero phase."
     )
     return theta
 
@@ -341,6 +362,10 @@ def load_initial_theta(args, theta_labels, run_dir=None):
         return load_current_theta_csv(out_csv, theta_labels)
 
     if getattr(args, "assume_reference_zero", False):
+        run_log(
+            "[ColumnPhaseOptimize] current theta=0 is defined as the voltage-pair baseline; "
+            "it is not absolute physical zero phase."
+        )
         out_csv = current_theta_path if current_theta_path is not None else Path("current_theta_second_column.csv")
         return save_zero_current_theta_csv(out_csv, theta_labels)
 
@@ -807,6 +832,17 @@ def compute_iteration_errors(theta_current, theta_target, P_current_model, P_tar
     return theta_error, output_metrics
 
 
+def compute_convergence(theta_converged, output_converged, mode):
+    mode = str(mode or "theta_only")
+    if mode == "theta_only":
+        return bool(theta_converged)
+    if mode == "theta_and_model":
+        return bool(theta_converged and output_converged)
+    if mode == "theta_or_model":
+        return bool(theta_converged or output_converged)
+    raise ValueError("--convergence_mode must be theta_only, theta_and_model, or theta_or_model")
+
+
 def build_target_theta(mzi_ids=DEFAULT_MZI_IDS):
     target = []
     for mzi in mzi_ids:
@@ -815,6 +851,10 @@ def build_target_theta(mzi_ids=DEFAULT_MZI_IDS):
 
 
 def init_theta_reference(reference_dir, probe_map, sigma_sign_path=None, mzi_ids=DEFAULT_MZI_IDS, dry_run=False):
+    print(
+        "[ColumnPhaseOptimize] init_reference expects delta_baseline and sigma_baseline scans "
+        "collected at the voltage-pair baseline. This voltage-pair baseline defines theta=0."
+    )
     reference_dir = Path(reference_dir)
     delta_dir = reference_dir / "delta_baseline"
     sigma_dir = reference_dir / "sigma_baseline"
@@ -872,6 +912,8 @@ def init_theta_reference(reference_dir, probe_map, sigma_sign_path=None, mzi_ids
 
     data = {
         "mzi_ids": [int(x) for x in mzi_ids],
+        "initial_state": "voltage_pair",
+        "theta_zero_definition": "relative to voltage-pair baseline",
         "probe_map": {str(k): v for k, v in probe_map.items()},
         "delta_eta_ref": delta_eta_ref,
         "delta_w_ref": delta_w_ref,
@@ -961,7 +1003,13 @@ def save_current_theta_outputs(out_csv, theta_labels, theta_values, details, sum
     return out_csv, detail_path, summary_path
 
 
-def measure_current_theta_from_files(reference_dir, current_dir, out_csv="current_theta_second_column.csv"):
+def measure_current_theta_from_files(
+    reference_dir,
+    current_dir,
+    out_csv="current_theta_second_column.csv",
+    strict_phase_jump=False,
+    visibility_threshold=0.3,
+):
     reference = load_theta_reference(reference_dir)
     mzi_ids = [int(x) for x in reference["mzi_ids"]]
     probe_map = {str(k): v for k, v in reference.get("probe_map", {}).items()}
@@ -973,6 +1021,11 @@ def measure_current_theta_from_files(reference_dir, current_dir, out_csv="curren
     sigma_dict = {}
     details = []
     warnings = []
+    failed_mzi_ids = set()
+    low_visibility_mzi_ids = set()
+    phase_jump_mzi_ids = set()
+    strict_phase_jump = parse_bool(strict_phase_jump)
+    visibility_threshold = float(visibility_threshold)
 
     for mzi_id in mzi_ids:
         key = str(int(mzi_id))
@@ -1000,10 +1053,13 @@ def measure_current_theta_from_files(reference_dir, current_dir, out_csv="curren
             delta_delta = delta_eta if probe_arm == "u" else -delta_eta
             if abs(delta_eta) > np.pi / 2:
                 row_warning.append("Delta phase jump may be too large")
-            if delta_fit["A"] < 0.3 * float(delta_ref["A"]):
+                phase_jump_mzi_ids.add(int(mzi_id))
+            if delta_fit["A"] < visibility_threshold * float(delta_ref["A"]):
                 row_warning.append("Delta low visibility")
+                low_visibility_mzi_ids.add(int(mzi_id))
         except Exception as exc:
             row_warning.append(f"Delta fit failed: {exc}")
+            failed_mzi_ids.add(int(mzi_id))
 
         try:
             sigma_ref = reference["sigma_fit"][key]
@@ -1021,11 +1077,14 @@ def measure_current_theta_from_files(reference_dir, current_dir, out_csv="curren
             delta_sigma = coeff * delta_beta
             if abs(delta_beta) > np.pi / 2:
                 row_warning.append("Sigma phase jump may be too large")
-            if sigma_fit["A"] < 0.3 * float(sigma_ref["A"]):
+                phase_jump_mzi_ids.add(int(mzi_id))
+            if sigma_fit["A"] < visibility_threshold * float(sigma_ref["A"]):
                 row_warning.append("Sigma low visibility")
+                low_visibility_mzi_ids.add(int(mzi_id))
         except Exception as exc:
             coeff = float(reference.get("sigma_coeff", {}).get(key, 2.0))
             row_warning.append(f"Sigma fit failed: {exc}")
+            failed_mzi_ids.add(int(mzi_id))
 
         delta_dict[key] = delta_delta
         sigma_dict[key] = delta_sigma
@@ -1056,11 +1115,24 @@ def measure_current_theta_from_files(reference_dir, current_dir, out_csv="curren
         )
 
     theta_values = combine_delta_sigma_to_theta(delta_dict, sigma_dict, mzi_ids)
+    valid_theta_count = int(np.sum(np.isfinite(theta_values)))
+    allow_hardware_update = bool(valid_theta_count == len(theta_values))
+    if failed_mzi_ids or low_visibility_mzi_ids:
+        allow_hardware_update = False
+    if strict_phase_jump and phase_jump_mzi_ids:
+        allow_hardware_update = False
     summary = {
         "max_abs_theta": float(np.nanmax(np.abs(theta_values))) if np.isfinite(theta_values).any() else np.nan,
         "mzi_ids": mzi_ids,
         "reference_dir": str(reference_dir),
         "current_dir": str(current_dir),
+        "valid_theta_count": valid_theta_count,
+        "failed_mzi_ids": sorted(failed_mzi_ids),
+        "low_visibility_mzi_ids": sorted(low_visibility_mzi_ids),
+        "phase_jump_mzi_ids": sorted(phase_jump_mzi_ids),
+        "strict_phase_jump": bool(strict_phase_jump),
+        "visibility_threshold": visibility_threshold,
+        "allow_hardware_update": allow_hardware_update,
         "warnings": warnings,
     }
     save_current_theta_outputs(out_csv, theta_labels, theta_values, details, summary)
@@ -1176,6 +1248,9 @@ def maybe_line_search_update(J, P_current, theta_current, theta_target, result, 
     best = None
     min_alpha = float(getattr(args, "line_search_min_alpha", 0.05))
     shrink = float(getattr(args, "line_search_shrink", 0.5))
+    metric = getattr(args, "line_search_metric", "theta")
+    theta_weight = float(getattr(args, "theta_weight", 1.0))
+    model_weight = float(getattr(args, "model_weight", 0.2))
     while alpha_try >= min_alpha:
         step_limited, step_scale = apply_step_limits(result["delta_raw"], alpha_try, args.step_limit_w)
         P_next, delta_applied, clipped = apply_power_limits(P_current, step_limited, args.power_limit_w)
@@ -1200,11 +1275,26 @@ def maybe_line_search_update(J, P_current, theta_current, theta_target, result, 
             "pred_output_rmse": pred_rmse,
         }
         best = candidate
-        if pred_theta_norm <= current_theta_norm and pred_rmse <= current_rmse:
+        theta_improved = pred_theta_norm <= current_theta_norm
+        model_improved = pred_rmse <= current_rmse
+        if metric == "theta":
+            accept = theta_improved
+        elif metric == "model":
+            accept = model_improved
+        elif metric == "both":
+            accept = theta_improved and model_improved
+        elif metric == "weighted":
+            current_score = theta_weight + model_weight
+            pred_score = theta_weight * pred_theta_norm / max(current_theta_norm, 1e-12)
+            pred_score += model_weight * pred_rmse / max(current_rmse, 1e-12)
+            accept = pred_score <= current_score
+        else:
+            raise ValueError("--line_search_metric must be theta, model, both, or weighted")
+        if accept:
             return candidate, warnings
         alpha_try *= shrink
 
-    warnings.append("line search reached minimum alpha without improving both theta norm and model output RMSE")
+    warnings.append(f"line search reached minimum alpha without improving metric={metric}")
     if best is not None:
         return best, warnings
     result["alpha_used"] = float(args.alpha)
@@ -1286,8 +1376,8 @@ def save_plan_outputs(
     phase_df.to_csv(out_dir / "phase_error.csv", index=False)
 
     summary = {
-        "max_abs_error_rad": float(np.max(np.abs(error))),
-        "norm_error": float(np.linalg.norm(error)),
+        "max_abs_theta_error_rad": float(np.max(np.abs(error))),
+        "norm_theta_error": float(np.linalg.norm(error)),
         "alpha": args.alpha,
         "alpha_used": float(plan.get("alpha_used", args.alpha)),
         "lambda_reg": args.lambda_reg,
@@ -1371,6 +1461,23 @@ def plot_theta_target_vs_current(theta_labels, theta_current, theta_target, out_
     plt.close()
 
 
+def plot_theta_component_history(theta_df, theta_labels, theta_target, out_path):
+    if theta_df.empty:
+        return
+    plt.figure(figsize=(9, 5))
+    for idx, label in enumerate(theta_labels):
+        if label in theta_df.columns:
+            plt.plot(theta_df["iter"], theta_df[label], marker="o", label=label)
+            plt.axhline(theta_target[idx], linestyle="--", linewidth=0.8, alpha=0.5)
+    plt.xlabel("Iteration")
+    plt.ylabel("Theta (rad)")
+    plt.grid(True, alpha=0.3)
+    plt.legend(ncol=4, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
 def load_inputs(args):
     mzi_ids = parse_csv_list(args.mzi_ids, int)
     heater_labels = heater_labels_for_mzis(mzi_ids)
@@ -1383,8 +1490,9 @@ def load_inputs(args):
 
 
 def run_plan(args):
+    validate_initial_state(args)
     mzi_ids, heater_labels, theta_labels, J_df, heater_info, theta_target = load_inputs(args)
-    P_current = load_current_power_csv(args.current_power, heater_labels)
+    P_current = load_current_power_csv(resolve_current_power_path(args), heater_labels)
     theta_current = load_initial_theta(args, theta_labels)
     P_target = compute_theory_power_matrix(
         theta_target,
@@ -1426,9 +1534,10 @@ def run_plan(args):
 
 
 def simulate(args):
+    validate_initial_state(args)
     mzi_ids, heater_labels, theta_labels, J_df, heater_info, theta_target = load_inputs(args)
     J = J_df.to_numpy(dtype=float)
-    P = load_current_power_csv(args.current_power, heater_labels)
+    P = load_current_power_csv(resolve_current_power_path(args), heater_labels)
     theta = load_initial_theta(args, theta_labels)
     P_target = compute_theory_power_matrix(
         theta_target,
@@ -1455,6 +1564,7 @@ def simulate(args):
         error = compute_phase_error(theta_target, theta)
         theta_converged = bool(np.max(np.abs(error)) < args.theta_tol)
         output_converged = bool(output_metrics["rmse"] < getattr(args, "output_tol", 0.02))
+        converged = compute_convergence(theta_converged, output_converged, getattr(args, "convergence_mode", "theta_only"))
         log_rows.append(
             {
                 "iter": k,
@@ -1469,7 +1579,8 @@ def simulate(args):
                 "num_clipped": 0,
                 "theta_converged": theta_converged,
                 "output_converged": output_converged,
-                "converged": theta_converged and output_converged,
+                "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
+                "converged": converged,
                 "warning": "",
             }
         )
@@ -1498,6 +1609,7 @@ def simulate(args):
     plot_output_rmse_history(log_df, out_dir / "simulate_output_rmse_plot.png")
     plot_power_history(power_df, out_dir / "power_history.png")
     plot_theta_target_vs_current(theta_labels, theta, theta_target, out_dir / "final_theta_compare.png")
+    plot_theta_component_history(theta_df, theta_labels, theta_target, out_dir / "theta_each_component_history.png")
     final_model = compute_theory_power_matrix(
         theta,
         N=getattr(args, "N", 9),
@@ -1508,8 +1620,60 @@ def simulate(args):
     plot_output_compare(P_target, final_model, out_dir / "final_output_compare.png")
 
 
-def measure_current_theta(reference_dir, current_dir, out_csv="current_theta_second_column.csv"):
-    return measure_current_theta_from_files(reference_dir, current_dir, out_csv=out_csv)
+def measure_current_theta(
+    reference_dir,
+    current_dir,
+    out_csv="current_theta_second_column.csv",
+    strict_phase_jump=False,
+    visibility_threshold=0.3,
+):
+    return measure_current_theta_from_files(
+        reference_dir,
+        current_dir,
+        out_csv=out_csv,
+        strict_phase_jump=strict_phase_jump,
+        visibility_threshold=visibility_threshold,
+    )
+
+
+def validate_initial_state(args):
+    initial_state = getattr(args, "initial_state", "voltage_pair")
+    if initial_state != "voltage_pair":
+        raise ValueError("Only --initial_state voltage_pair is currently supported.")
+
+
+def resolve_current_power_path(args):
+    path = getattr(args, "current_power", None) or getattr(args, "voltage_pair_power", None)
+    if path is None:
+        path = "current_power_second_column.csv"
+    return Path(path)
+
+
+def save_hardware_run_config(run_dir, args):
+    config = {
+        "mode": "iterate",
+        "dry_run": bool(args.dry_run),
+        "confirm_hardware": bool(getattr(args, "confirm_hardware", False)),
+        "j_theta": args.j_theta,
+        "mzi_table": args.mzi_table,
+        "current_power": str(resolve_current_power_path(args)),
+        "reference_dir": args.reference_dir,
+        "current_dir": args.current_dir,
+        "alpha": args.alpha,
+        "lambda_reg": args.lambda_reg,
+        "step_limit_w": args.step_limit_w,
+        "power_limit_w": args.power_limit_w,
+        "voltage_limit_v": args.voltage_limit_v,
+        "max_iter": args.max_iter,
+        "scan_profile": getattr(args, "scan_profile", "fast"),
+        "theta_update_mode": getattr(args, "theta_update_mode", "measured_manual"),
+        "initial_state": getattr(args, "initial_state", "voltage_pair"),
+    }
+    path = Path(run_dir) / "hardware_run_config.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+    run_log(f"[ColumnPhaseOptimize] hardware run config saved to {path}")
+    return path
 
 
 def read_current_power_from_working_data(file_data, heater_info):
@@ -1570,6 +1734,45 @@ def build_probe_offsets(half_width_w, step_w):
     return np.round(np.linspace(-float(half_width_w), float(half_width_w), count), 9)
 
 
+def scan_profile_points(args, iteration_index=0):
+    profile = getattr(args, "scan_profile", "fast")
+    if profile == "full":
+        delta_offsets = np.linspace(-float(args.probe_half_width_w), float(args.probe_half_width_w), 9)
+        sigma_points = np.linspace(0.0, 2.0 * np.pi, 9)
+    elif profile == "fast":
+        delta_offsets = np.linspace(-float(args.probe_half_width_w), float(args.probe_half_width_w), 5)
+        sigma_points = np.linspace(0.0, 2.0 * np.pi, 5)
+    elif profile == "ultra_fast":
+        delta_offsets = np.linspace(-float(args.probe_half_width_w), float(args.probe_half_width_w), 5)
+        interval = max(1, int(getattr(args, "sigma_update_interval", 2)))
+        sigma_points = np.linspace(0.0, 2.0 * np.pi, 5) if iteration_index % interval == 0 else np.array([])
+    elif profile == "custom":
+        delta_offsets = build_probe_offsets(args.probe_half_width_w, args.probe_step_w)
+        sigma_points = np.array(parse_csv_list(args.sigma_phase_points, float), dtype=float)
+    else:
+        raise ValueError("--scan_profile must be full, fast, ultra_fast, or custom")
+    return np.round(delta_offsets, 9), np.round(sigma_points, 9)
+
+
+def print_scan_estimate(args, iteration_index, mzi_count):
+    delta_offsets, sigma_points = scan_profile_points(args, iteration_index)
+    delta_count = len(delta_offsets) * int(mzi_count)
+    sigma_count = len(sigma_points) * int(mzi_count)
+    total = delta_count + sigma_count
+    estimate = total * float(getattr(args, "estimated_seconds_per_point", 6.5))
+    run_log(
+        f"[ColumnPhaseOptimize] iteration {iteration_index + 1}: scan_profile={args.scan_profile}, "
+        f"delta_points={delta_count}, sigma_points={sigma_count}, total_points={total}, "
+        f"estimated_measure_time={estimate:.1f}s"
+    )
+    return {
+        "delta_points": int(delta_count),
+        "sigma_points": int(sigma_count),
+        "estimated_points": int(total),
+        "estimated_measure_time_s": float(estimate),
+    }
+
+
 def scan_delta_probe_current(
     observed_mzi,
     probe_arm,
@@ -1591,7 +1794,10 @@ def scan_delta_probe_current(
     baseline_power = voltage_to_power(baseline_v, info["resistance"])
     rows = []
 
-    for offset in build_probe_offsets(args.probe_half_width_w, args.probe_step_w):
+    offsets = getattr(args, "_delta_offsets", None)
+    if offsets is None:
+        offsets = build_probe_offsets(args.probe_half_width_w, args.probe_step_w)
+    for offset in offsets:
         scan_data = base_working_data.copy(deep=True)
         target_power = float(baseline_power) + float(offset)
         warning = ""
@@ -1678,7 +1884,9 @@ def scan_sigma_current(
     p_lower_base = float(voltage_to_power(base_v_lower, heater_r[1]))
     period_upper = 2.0 * ppi[0]
     period_lower = 2.0 * ppi[1]
-    phase_points = parse_csv_list(args.sigma_phase_points, float)
+    phase_points = getattr(args, "_sigma_points", None)
+    if phase_points is None:
+        phase_points = parse_csv_list(args.sigma_phase_points, float)
     rows = []
 
     for dp in phase_points:
@@ -1774,6 +1982,8 @@ def acquire_current_theta_scans(base_working_data, hardware, mzi_table, args, cu
     probe_map = parse_probe_map(getattr(args, "probe_map", ""), parse_csv_list(args.mzi_ids, int))
     base_snapshot = base_working_data.copy(deep=True)
     iter_label = getattr(args, "_current_iter_label", "unknown")
+    iteration_index = int(getattr(args, "_current_iter_index", 0))
+    args._delta_offsets, args._sigma_points = scan_profile_points(args, iteration_index)
     run_log(f"[ColumnPhaseOptimize] iteration {iter_label}: start automatic current theta scans -> {current_dir}")
 
     for mzi_id in parse_csv_list(args.mzi_ids, int):
@@ -1802,10 +2012,20 @@ def acquire_current_theta_scans(base_working_data, hardware, mzi_table, args, cu
 
 
 def iterate(args):
+    validate_initial_state(args)
+    if not args.dry_run and not parse_bool(getattr(args, "confirm_hardware", False)):
+        raise RuntimeError("Refusing hardware write: set --confirm_hardware true with --dry_run false.")
     mzi_ids, heater_labels, theta_labels, J_df, heater_info, theta_target = load_inputs(args)
     J = J_df.to_numpy(dtype=float)
     mzi_table = load_mzi_table(args.mzi_table)
-    run_dir = Path(args.out_dir) / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if parse_bool(getattr(args, "resume", False)):
+        if not getattr(args, "resume_run_dir", None):
+            raise ValueError("--resume true requires --resume_run_dir")
+        run_dir = Path(args.resume_run_dir)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"resume_run_dir not found: {run_dir}")
+    else:
+        run_dir = Path(args.out_dir) / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir.mkdir(parents=True, exist_ok=True)
     P_target = compute_theory_power_matrix(
         theta_target,
@@ -1815,8 +2035,27 @@ def iterate(args):
         other_theta_file=getattr(args, "other_theta_file", None),
     )
 
-    current_power_path = Path(args.current_power)
-    if not current_power_path.exists() and getattr(args, "auto_init_current_power_from_bar", False):
+    start_iter = 0
+    resumed_theta = None
+    resumed_power = None
+    if parse_bool(getattr(args, "resume", False)):
+        existing_power_files = sorted(run_dir.glob("iter_*_power.csv"))
+        existing_theta_files = sorted(run_dir.glob("iter_*_theta.csv"))
+        if existing_power_files and existing_theta_files:
+            last_power = existing_power_files[-1]
+            last_theta = existing_theta_files[-1]
+            start_iter = int(last_power.stem.split("_")[1]) + 1
+            resumed_power = load_current_power_csv(last_power, heater_labels)
+            resumed_theta = load_current_theta_csv(last_theta, theta_labels)
+            if (run_dir / f"iter_{start_iter - 1:03d}_update.csv").exists() and not (run_dir / f"iter_{start_iter - 1:03d}_measured_theta.csv").exists():
+                run_log("[ColumnPhaseOptimize] previous iteration has update but no measured theta; verify current_theta before continuing.")
+        else:
+            raise FileNotFoundError("resume_run_dir has no iter_*_power.csv / iter_*_theta.csv files.")
+
+    current_power_path = resolve_current_power_path(args)
+    if resumed_power is not None:
+        P = resumed_power
+    elif not current_power_path.exists() and getattr(args, "auto_init_current_power_from_bar", False):
         mzi_ids = parse_csv_list(args.mzi_ids, int)
         P = save_current_power_from_bar_state(current_power_path, mzi_table, heater_info, mzi_ids)
     else:
@@ -1824,10 +2063,12 @@ def iterate(args):
     current_theta_path = Path(args.current_theta) if args.current_theta else None
     log_rows = []
     power_rows = []
+    theta_rows = []
 
     hardware = None
     working_data = None
     if not args.dry_run:
+        save_hardware_run_config(run_dir, args)
         import utils.communication as cu
         from inter_calibration import write_port_voltage
 
@@ -1847,11 +2088,19 @@ def iterate(args):
     if not args.dry_run and getattr(args, "auto_measure_current_theta", False):
         ensure_theta_reference(args.reference_dir, args, mzi_ids)
     ref_ready_initial = bool(args.reference_dir) and (Path(args.reference_dir) / "theta_reference.json").exists()
-    if not args.dry_run and getattr(args, "auto_measure_current_theta", False) and ref_ready_initial:
+    if resumed_theta is not None:
+        theta = resumed_theta
+    elif not args.dry_run and getattr(args, "auto_measure_current_theta", False) and ref_ready_initial:
         args._current_iter_label = "initial"
         acquire_current_theta_scans(working_data, hardware, mzi_table, args, args.current_dir)
         theta_csv = run_dir / "current_theta_initial_measured.csv"
-        measure_current_theta(args.reference_dir, args.current_dir, out_csv=theta_csv)
+        measure_current_theta(
+            args.reference_dir,
+            args.current_dir,
+            out_csv=theta_csv,
+            strict_phase_jump=getattr(args, "strict_phase_jump", False),
+            visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+        )
         theta = load_current_theta_csv(theta_csv, theta_labels)
     else:
         try:
@@ -1862,11 +2111,24 @@ def iterate(args):
             args._current_iter_label = "initial"
             acquire_current_theta_scans(working_data, hardware, mzi_table, args, args.current_dir)
             theta_csv = run_dir / "current_theta_initial_measured.csv"
-            measure_current_theta(args.reference_dir, args.current_dir, out_csv=theta_csv)
+            measure_current_theta(
+                args.reference_dir,
+                args.current_dir,
+                out_csv=theta_csv,
+                strict_phase_jump=getattr(args, "strict_phase_jump", False),
+                visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+            )
             theta = load_current_theta_csv(theta_csv, theta_labels)
 
-    for k in range(args.max_iter):
+    for k in range(start_iter, args.max_iter):
         run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: evaluate current theta and model output")
+        scan_info = print_scan_estimate(args, k, len(mzi_ids)) if getattr(args, "theta_update_mode", "measured_manual") == "measured_auto" else {
+            "delta_points": 0,
+            "sigma_points": 0,
+            "estimated_points": 0,
+            "estimated_measure_time_s": 0.0,
+        }
+        actual_measure_time_s = 0.0
         if np.isnan(theta).any() and not args.dry_run:
             raise ValueError("Current theta contains NaN; hardware write is blocked.")
         P_current_model = compute_theory_power_matrix(
@@ -1885,11 +2147,12 @@ def iterate(args):
         error = compute_phase_error(theta_target, theta)
         theta_converged = bool(np.max(np.abs(error)) < args.theta_tol)
         output_converged = bool(output_metrics["rmse"] < getattr(args, "output_tol", 0.02))
-        converged = theta_converged and output_converged
+        converged = compute_convergence(theta_converged, output_converged, getattr(args, "convergence_mode", "theta_only"))
         pd.DataFrame({"theta": theta_labels, "value_rad": theta}).to_csv(run_dir / f"iter_{k:03d}_theta.csv", index=False)
         pd.DataFrame({"heater": heater_labels, "power_w": P}).to_csv(run_dir / f"iter_{k:03d}_power.csv", index=False)
         pd.DataFrame({"theta": theta_labels, "error_rad": error}).to_csv(run_dir / f"iter_{k:03d}_error.csv", index=False)
         power_rows.append({"iter": k, **dict(zip(heater_labels, P))})
+        theta_rows.append({"iter": k, **dict(zip(theta_labels, theta))})
         run_log(
             f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: "
             f"max_theta_error={float(np.max(np.abs(error))):.6f} rad, "
@@ -1915,6 +2178,7 @@ def iterate(args):
                     "num_clipped": 0,
                     "theta_converged": theta_converged,
                     "output_converged": output_converged,
+                    "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
                     "converged": True,
                     "warning": "",
                 }
@@ -1941,6 +2205,31 @@ def iterate(args):
             output_metrics=output_metrics,
         )
         update_df.to_csv(run_dir / f"iter_{k:03d}_update.csv", index=False)
+        iter_summary = {
+            "iter": k,
+            "theta_source": getattr(args, "theta_update_mode", "measured_manual"),
+            "scan_profile": getattr(args, "scan_profile", "fast"),
+            **scan_info,
+            "max_abs_theta_error_rad": float(np.max(np.abs(error))),
+            "norm_theta_error": float(np.linalg.norm(error)),
+            "model_output_rmse": output_metrics["rmse"],
+            "model_output_mae": output_metrics["mae"],
+            "model_output_max_abs": output_metrics["max_abs"],
+            "alpha_used": float(plan.get("alpha_used", args.alpha)),
+            "lambda_reg": args.lambda_reg,
+            "line_search_metric": getattr(args, "line_search_metric", "theta"),
+            "step_scale": float(plan["step_scale"]),
+            "num_clipped": int(np.sum(plan["clipped"])),
+            "num_voltage_clipped": int(np.sum(update_df["clipped"].to_numpy(dtype=bool))),
+            "allow_hardware_update": bool(np.isfinite(theta).all()),
+            "theta_converged": theta_converged,
+            "output_converged": output_converged,
+            "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
+            "converged": converged,
+            "warning": "; ".join(plan["warnings"]),
+        }
+        with (run_dir / f"iter_{k:03d}_summary.json").open("w", encoding="utf-8") as f:
+            json.dump(iter_summary, f, indent=2)
         if not args.dry_run:
             upload_second_column_voltages(
                 working_data,
@@ -1955,28 +2244,43 @@ def iterate(args):
 
             time.sleep(args.settle_time)
             ref_ready = bool(args.reference_dir) and (Path(args.reference_dir) / "theta_reference.json").exists()
-            if getattr(args, "auto_measure_current_theta", False):
+            theta_update_mode = getattr(args, "theta_update_mode", "measured_manual")
+            if theta_update_mode == "measured_manual":
+                if current_theta_path is None:
+                    raise FileNotFoundError("measured_manual requires --current_theta pointing to a CSV file.")
+                input(
+                    f"Hardware updated. Measure current theta, update {current_theta_path}, "
+                    "then press Enter to continue..."
+                )
+                theta = load_current_theta_csv(current_theta_path, theta_labels)
+            elif theta_update_mode == "measured_auto" or getattr(args, "auto_measure_current_theta", False):
                 if not ref_ready:
                     ensure_theta_reference(args.reference_dir, args, mzi_ids)
                 args._current_iter_label = f"{k + 1}/{args.max_iter}"
+                args._current_iter_index = k
+                measure_start = time.perf_counter()
                 acquire_current_theta_scans(working_data, hardware, mzi_table, args, args.current_dir)
+                actual_measure_time_s = time.perf_counter() - measure_start
                 theta_csv = run_dir / f"iter_{k:03d}_measured_theta.csv"
-                measure_current_theta(args.reference_dir, args.current_dir, out_csv=theta_csv)
+                measure_current_theta(
+                    args.reference_dir,
+                    args.current_dir,
+                    out_csv=theta_csv,
+                    strict_phase_jump=getattr(args, "strict_phase_jump", False),
+                    visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+                )
                 theta = load_current_theta_csv(theta_csv, theta_labels)
                 run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: updated theta from automatic scans")
-            elif ref_ready and Path(args.current_dir).exists():
-                theta_csv = run_dir / f"iter_{k:03d}_measured_theta.csv"
-                measure_current_theta(args.reference_dir, args.current_dir, out_csv=theta_csv)
-                theta = load_current_theta_csv(theta_csv, theta_labels)
-            elif current_theta_path is not None and current_theta_path.exists():
-                theta = load_current_theta_csv(current_theta_path, theta_labels)
+            elif theta_update_mode == "predicted":
+                theta = theta + J @ (plan["P_next"] - P)
+                run_log("[ColumnPhaseOptimize] predicted theta update used after hardware write")
+            elif theta_update_mode == "hybrid":
+                if current_theta_path is not None and current_theta_path.exists():
+                    theta = load_current_theta_csv(current_theta_path, theta_labels)
+                else:
+                    theta = theta + J @ (plan["P_next"] - P)
             else:
-                print(
-                    "[ColumnPhaseOptimize] No theta measurement source is available after hardware update; "
-                    "stopping after this iteration."
-                )
-                P = plan["P_next"]
-                break
+                raise ValueError("--theta_update_mode must be measured_manual, measured_auto, predicted, or hybrid")
         else:
             theta = theta + J @ (plan["P_next"] - P)
             run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: dry-run theta propagated")
@@ -1994,10 +2298,18 @@ def iterate(args):
                 "measured_output_max_abs": "" if measured_metrics is None else measured_metrics["max_abs"],
                 "alpha_used": float(plan.get("alpha_used", args.alpha)),
                 "lambda_reg": args.lambda_reg,
+                "line_search_metric": getattr(args, "line_search_metric", "theta"),
                 "step_scale": plan["step_scale"],
                 "num_clipped": int(np.sum(plan["clipped"])),
+                "num_voltage_clipped": int(np.sum(update_df["clipped"].to_numpy(dtype=bool))),
+                "allow_hardware_update": bool(np.isfinite(theta).all()),
+                "theta_source": getattr(args, "theta_update_mode", "measured_manual"),
+                "scan_profile": getattr(args, "scan_profile", "fast"),
+                **scan_info,
+                "actual_measure_time_s": float(actual_measure_time_s),
                 "theta_converged": theta_converged,
                 "output_converged": output_converged,
+                "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
                 "converged": False,
                 "warning": "; ".join(plan["warnings"]),
             }
@@ -2017,6 +2329,10 @@ def iterate(args):
         plot_output_rmse_history(log_df, run_dir / "output_rmse_history.png")
     if power_rows:
         plot_power_history(pd.DataFrame(power_rows), run_dir / "power_history.png")
+    if theta_rows:
+        theta_history_df = pd.DataFrame(theta_rows)
+        theta_history_df.to_csv(run_dir / "theta_history.csv", index=False)
+        plot_theta_component_history(theta_history_df, theta_labels, theta_target, run_dir / "theta_each_component_history.png")
     final_model = compute_theory_power_matrix(
         theta,
         N=getattr(args, "N", 9),
@@ -2034,6 +2350,78 @@ def iterate(args):
                 close()
 
 
+def verify_step(args):
+    validate_initial_state(args)
+    mzi_ids, heater_labels, theta_labels, J_df, heater_info, theta_target = load_inputs(args)
+    J = J_df.to_numpy(dtype=float)
+    heater = normalize_heater_label(args.test_heater)
+    if heater not in heater_labels:
+        raise ValueError(f"--test_heater must be one of {heater_labels}")
+    col_idx = heater_labels.index(heater)
+    theta_before = load_initial_theta(args, theta_labels)
+    delta_pred = J[:, col_idx] * float(args.test_delta_power_w)
+    out_dir = Path(args.out_dir) / f"verify_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.dry_run:
+        theta_after = theta_before + delta_pred
+    else:
+        if not parse_bool(getattr(args, "confirm_hardware", False)):
+            raise RuntimeError("Refusing hardware write: set --confirm_hardware true with --dry_run false.")
+        import utils.communication as cu
+        from inter_calibration import write_port_voltage
+
+        P = load_current_power_csv(resolve_current_power_path(args), heater_labels)
+        P[col_idx] += float(args.test_delta_power_w)
+        working_data = cu.generate_working_data()
+        apply_power_vector_to_working_data(working_data, heater_info, P, write_port_voltage)
+        mcv = cu.open_ser_connection(args.ser_address)
+        if mcv is None:
+            raise RuntimeError(f"Failed to open serial port {args.ser_address}.")
+        upload_working_data_checked(cu, mcv, working_data, args.voltage_limit_v, context_label=f"verify_step {heater}")
+        input(f"Perturbation applied to {heater}. Measure/update {args.current_theta}, then press Enter...")
+        theta_after = load_current_theta_csv(args.current_theta, theta_labels)
+        close = getattr(mcv, "close", None)
+        if callable(close):
+            close()
+
+    delta_measured = wrap_to_pi(theta_after - theta_before)
+    signs = np.sign(delta_measured) == np.sign(delta_pred)
+    valid = np.isfinite(delta_measured) & np.isfinite(delta_pred) & (np.abs(delta_pred) > 1e-12)
+    sign_agreement_ratio = float(np.mean(signs[valid])) if np.any(valid) else np.nan
+    rows = pd.DataFrame(
+        {
+            "theta": theta_labels,
+            "theta_before": theta_before,
+            "theta_after": theta_after,
+            "delta_theta_measured": delta_measured,
+            "delta_theta_pred": delta_pred,
+            "sign_agree": signs,
+        }
+    )
+    rows.to_csv(out_dir / "verify_step_result.csv", index=False)
+    plt.figure(figsize=(8, 4.5))
+    x = np.arange(len(theta_labels))
+    plt.bar(x - 0.18, delta_measured, width=0.36, label="measured")
+    plt.bar(x + 0.18, delta_pred, width=0.36, label="predicted")
+    plt.xticks(x, theta_labels, rotation=45)
+    plt.ylabel("Delta theta (rad)")
+    plt.grid(True, axis="y", alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_dir / "verify_step_compare.png", dpi=160)
+    plt.close()
+    summary = {
+        "test_heater": heater,
+        "test_delta_power_w": float(args.test_delta_power_w),
+        "sign_agreement_ratio": sign_agreement_ratio,
+        "warning": "J_theta row/column order or sign may be wrong." if sign_agreement_ratio < 0.7 else "",
+    }
+    with (out_dir / "verify_step_summary.json").open("w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    print(json.dumps(summary, indent=2))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="Optimize second-column MZI arm phases using measured J_theta.")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -2049,29 +2437,44 @@ def build_parser():
         p.add_argument("--step_limit_w", type=float, default=DEFAULT_STEP_LIMIT_W)
         p.add_argument("--theta_tol", type=float, default=DEFAULT_THETA_TOL)
         p.add_argument("--voltage_limit_v", type=float, default=DEFAULT_VOLTAGE_LIMIT_V)
-        p.add_argument("--enable_branch_search", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=False)
+        p.add_argument("--enable_branch_search", type=parse_bool, default=False)
         p.add_argument("--branch_candidates", default="0,1")
         p.add_argument("--N", type=int, default=9)
         p.add_argument("--bw_phases", default=DEFAULT_BW_PHASES)
         p.add_argument("--other_theta_file")
         p.add_argument("--output_tol", type=float, default=0.02)
         p.add_argument("--measured_output")
-        p.add_argument("--enable_line_search", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=False)
+        p.add_argument("--enable_line_search", type=parse_bool, default=False)
         p.add_argument("--line_search_min_alpha", type=float, default=0.05)
         p.add_argument("--line_search_shrink", type=float, default=0.5)
-        p.add_argument("--assume_reference_zero", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=False)
+        p.add_argument("--assume_reference_zero", type=parse_bool, default=False)
+        p.add_argument("--initial_state", default="voltage_pair")
+        p.add_argument("--voltage_pair_power", default="current_power_second_column.csv")
+        p.add_argument("--strict_phase_jump", type=parse_bool, default=False)
+        p.add_argument("--visibility_threshold", type=float, default=0.3)
+        p.add_argument("--scan_profile", default="fast", choices=["full", "fast", "ultra_fast", "custom"])
+        p.add_argument("--sigma_update_interval", type=int, default=2)
+        p.add_argument("--estimated_seconds_per_point", type=float, default=6.5)
+        p.add_argument("--convergence_mode", default="theta_only", choices=["theta_only", "theta_and_model", "theta_or_model"])
+        p.add_argument("--line_search_metric", default="theta", choices=["theta", "model", "both", "weighted"])
+        p.add_argument("--theta_weight", type=float, default=1.0)
+        p.add_argument("--model_weight", type=float, default=0.2)
+        p.add_argument("--resume", type=parse_bool, default=False)
+        p.add_argument("--resume_run_dir")
 
     p_init = sub.add_parser("init_reference")
     p_init.add_argument("--mzi_ids", default="5,6,7,8")
     p_init.add_argument("--reference_dir", default="Scandata/current_theta_reference")
     p_init.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
     p_init.add_argument("--sigma_sign", default="Scandata/J_sigma/sign_check/sigma_sign.json")
-    p_init.add_argument("--dry_run", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=False)
+    p_init.add_argument("--dry_run", type=parse_bool, default=False)
 
     p_measure_theta = sub.add_parser("measure_theta")
     p_measure_theta.add_argument("--reference_dir", default="Scandata/current_theta_reference")
     p_measure_theta.add_argument("--current_dir", default="Scandata/current_theta_measurement")
     p_measure_theta.add_argument("--out_csv", default="current_theta_second_column.csv")
+    p_measure_theta.add_argument("--strict_phase_jump", type=parse_bool, default=False)
+    p_measure_theta.add_argument("--visibility_threshold", type=float, default=0.3)
 
     p_plan = sub.add_parser("plan")
     add_common(p_plan)
@@ -2090,7 +2493,7 @@ def build_parser():
 
     p_iter = sub.add_parser("iterate")
     add_common(p_iter)
-    p_iter.add_argument("--current_power", required=True)
+    p_iter.add_argument("--current_power")
     p_iter.add_argument("--current_theta")
     p_iter.add_argument("--reference_dir")
     p_iter.add_argument("--current_dir")
@@ -2099,16 +2502,31 @@ def build_parser():
     p_iter.add_argument("--sigma_sign_path", default="Scandata/J_sigma/sign_check/sigma_sign.json")
     p_iter.add_argument("--max_iter", type=int, default=DEFAULT_MAX_ITER)
     p_iter.add_argument("--settle_time", type=float, default=DEFAULT_SETTLE_TIME)
-    p_iter.add_argument("--dry_run", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=True)
+    p_iter.add_argument("--dry_run", type=parse_bool, default=True)
+    p_iter.add_argument("--confirm_hardware", type=parse_bool, default=False)
     p_iter.add_argument("--ser_address", default="COM3")
     p_iter.add_argument("--opm2_address", default=DEFAULT_OPM2_ADDRESS)
-    p_iter.add_argument("--pause_for_manual_theta_update", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=False)
-    p_iter.add_argument("--auto_measure_current_theta", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=True)
+    p_iter.add_argument("--pause_for_manual_theta_update", type=parse_bool, default=False)
+    p_iter.add_argument("--auto_measure_current_theta", type=parse_bool, default=False)
+    p_iter.add_argument("--theta_update_mode", default="measured_manual", choices=["measured_manual", "measured_auto", "predicted", "hybrid"])
     p_iter.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
     p_iter.add_argument("--probe_half_width_w", type=float, default=0.001)
     p_iter.add_argument("--probe_step_w", type=float, default=0.00025)
     p_iter.add_argument("--sigma_phase_points", default="0,0.785398,1.570796,2.356194,3.141593,3.926991,4.712389,5.497787,6.283185")
-    p_iter.add_argument("--auto_init_current_power_from_bar", type=lambda x: str(x).lower() in {"1", "true", "yes", "y"}, default=True)
+    p_iter.add_argument("--auto_init_current_power_from_bar", type=parse_bool, default=False)
+
+    p_verify = sub.add_parser("verify_step")
+    add_common(p_verify)
+    p_verify.add_argument("--current_power", required=True)
+    p_verify.add_argument("--current_theta", required=True)
+    p_verify.add_argument("--reference_dir", default="Scandata/current_theta_reference")
+    p_verify.add_argument("--current_dir", default="Scandata/current_theta_measurement")
+    p_verify.add_argument("--test_heater", required=True)
+    p_verify.add_argument("--test_delta_power_w", type=float, default=0.0005)
+    p_verify.add_argument("--dry_run", type=parse_bool, default=True)
+    p_verify.add_argument("--confirm_hardware", type=parse_bool, default=False)
+    p_verify.add_argument("--ser_address", default="COM3")
+    p_verify.add_argument("--opm2_address", default=DEFAULT_OPM2_ADDRESS)
     return parser
 
 
@@ -2126,13 +2544,21 @@ def main():
             dry_run=args.dry_run,
         )
     elif args.mode == "measure_theta":
-        measure_current_theta_from_files(args.reference_dir, args.current_dir, args.out_csv)
+        measure_current_theta_from_files(
+            args.reference_dir,
+            args.current_dir,
+            args.out_csv,
+            strict_phase_jump=args.strict_phase_jump,
+            visibility_threshold=args.visibility_threshold,
+        )
     elif args.mode == "plan":
         run_plan(args)
     elif args.mode == "simulate":
         simulate(args)
     elif args.mode == "iterate":
         iterate(args)
+    elif args.mode == "verify_step":
+        verify_step(args)
     else:
         parser.error(f"Unsupported mode: {args.mode}")
 
@@ -2174,4 +2600,4 @@ def direct_main(config=DIRECT_RUN_CONFIG):
 
 
 if __name__ == "__main__":
-    direct_main()
+    main()
