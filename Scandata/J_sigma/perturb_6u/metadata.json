@@ -1,0 +1,10 @@
+{
+  "perturbed_heater": "6u",
+  "delta_power_w": 0.001,
+  "baseline_power_w": 0.03416308959859963,
+  "perturbed_power_w": 0.03516308959859963,
+  "baseline_voltage_v": 4.191,
+  "perturbed_voltage_v": 4.252,
+  "port": 12,
+  "heater_R_ohm": 514.1361980539365
+}

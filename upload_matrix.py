@@ -112,7 +112,7 @@ def fit_bw_phi_from_txt(txt_path):
     def sse(params):
         A, w, phi = params
         residual = y - cos_model(x, A, w, phi)
-        return float(np.sum(residual ** 2))
+        return float(np.sum(residual**2))
 
     max_power = float(np.max(y))
     bounds = [(0.0, max(10.0, max_power * 2.5)), (0.1, 5.0), (-2 * np.pi, 2 * np.pi)]
@@ -123,11 +123,7 @@ def fit_bw_phi_from_txt(txt_path):
 
 
 def load_bw_phases(bw_dir=os.path.join("Scandata", "BW"), expected_count=None):
-    txt_paths = [
-        os.path.join(bw_dir, name)
-        for name in os.listdir(bw_dir)
-        if name.lower().endswith(".txt")
-    ]
+    txt_paths = [os.path.join(bw_dir, name) for name in os.listdir(bw_dir) if name.lower().endswith(".txt")]
     txt_paths.sort(key=_bw_txt_sort_key)
 
     if expected_count is not None and len(txt_paths) != expected_count:
@@ -669,26 +665,26 @@ if __name__ == "__main__":
     with open(inter_cali_pairs_path, "r", encoding="utf-8") as f:
         inter_cali_pairs = json.load(f)
 
-    for i in range(4, N * (N - 1) // 2 - 4):
-        mzi_id = str(i + 1)
-        pair_entry = inter_cali_pairs.get(mzi_id)
-        if not pair_entry:
-            print(f"Skip MZI {mzi_id}: no entry in {inter_cali_pairs_path}")
-            continue
+    # for i in range(4, N * (N - 1) // 2 - 4):
+    #     mzi_id = str(i + 1)
+    #     pair_entry = inter_cali_pairs.get(mzi_id)
+    #     if not pair_entry:
+    #         print(f"Skip MZI {mzi_id}: no entry in {inter_cali_pairs_path}")
+    #         continue
 
-        ports = pair_entry.get("ports", [])
-        if not isinstance(ports, list) or len(ports) != 2:
-            raise ValueError(f"MZI {mzi_id} in {inter_cali_pairs_path} must contain two ports.")
+    #     ports = pair_entry.get("ports", [])
+    #     if not isinstance(ports, list) or len(ports) != 2:
+    #         raise ValueError(f"MZI {mzi_id} in {inter_cali_pairs_path} must contain two ports.")
 
-        upper_v = float(pair_entry.get("upper_arm_voltage", 0.0))
-        lower_v = float(pair_entry.get("lower_arm_voltage", 0.0))
-        cu.write_port_voltage(int(ports[0]), upper_v, working_data)
-        cu.write_port_voltage(int(ports[1]), lower_v, working_data)
-        print(
-            f"Deploy inter_cali pair MZI {mzi_id}: "
-            f"port {int(ports[0])} -> {upper_v:.3f} V, "
-            f"port {int(ports[1])} -> {lower_v:.3f} V"
-        )
+    #     upper_v = float(pair_entry.get("upper_arm_voltage", 0.0))
+    #     lower_v = float(pair_entry.get("lower_arm_voltage", 0.0))
+    #     cu.write_port_voltage(int(ports[0]), upper_v, working_data)
+    #     cu.write_port_voltage(int(ports[1]), lower_v, working_data)
+    #     print(
+    #         f"Deploy inter_cali pair MZI {mzi_id}: "
+    #         f"port {int(ports[0])} -> {upper_v:.3f} V, "
+    #         f"port {int(ports[1])} -> {lower_v:.3f} V"
+    #     )
 
     upload_v_checked(mcv, working_data, v_min, v_max)
     base_working_data = working_data.copy(deep=True)

@@ -1,0 +1,15 @@
+{
+  "max_abs_error_rad": 1.2077323994634952,
+  "norm_error": 1.7213269622946379,
+  "alpha": 0.3,
+  "alpha_used": 0.3,
+  "lambda_reg": 0.0001,
+  "power_limit_w": 0.055,
+  "step_limit_w": 0.002,
+  "condition_number_J": 7.159496387237737,
+  "used_branch_search": false,
+  "warnings": [],
+  "model_output_rmse": 0.08194869645955989,
+  "model_output_mae": 0.03480639868777843,
+  "model_output_max_abs": 0.24789802461680965
+}

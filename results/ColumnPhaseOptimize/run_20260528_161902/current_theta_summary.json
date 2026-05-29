@@ -1,0 +1,17 @@
+{
+  "max_abs_theta": 2.00648612173738,
+  "mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "reference_dir": "Scandata/current_theta_reference",
+  "current_dir": "Scandata\\current_theta_measurement",
+  "warnings": [
+    "MZI 5: Delta low visibility",
+    "MZI 6: Delta phase jump may be too large; Delta low visibility",
+    "MZI 7: Sigma low visibility",
+    "MZI 8: Delta phase jump may be too large; Sigma low visibility"
+  ]
+}
