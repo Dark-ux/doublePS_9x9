@@ -1,0 +1,50 @@
+{
+  "iter": 0,
+  "stopped_by_measurement_quality": true,
+  "failure_reason": "current_theta_summary allow_hardware_update=false",
+  "current_theta_summary": {
+    "max_abs_theta": 1.5370164500068246,
+    "mzi_ids": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "reference_dir": "Scandata/current_theta_reference",
+    "current_dir": "Scandata\\current_theta_measurement",
+    "valid_theta_count": 8,
+    "failed_mzi_ids": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "low_visibility_mzi_ids": [
+      6,
+      7,
+      8
+    ],
+    "phase_jump_mzi_ids": [
+      8
+    ],
+    "scan_quality_ok": false,
+    "outlier_mzi_ids": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "outlier_scan_types": [
+      "Sigma"
+    ],
+    "strict_phase_jump": false,
+    "visibility_threshold": 0.3,
+    "allow_hardware_update": false,
+    "warnings": [
+      "MZI 5: Sigma too many outliers, fit unreliable",
+      "MZI 6: Delta low visibility; Sigma too many outliers, fit unreliable",
+      "MZI 7: Sigma too many outliers, fit unreliable; Sigma low visibility",
+      "MZI 8: Delta phase jump may be too large; Sigma too many outliers, fit unreliable; Sigma low visibility"
+    ]
+  }
+}

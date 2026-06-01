@@ -1,0 +1,9 @@
+mzi_id,scan_type,scan_file,point_count,outlier_count,outlier_indices,outlier_values,rmse_uW,amplitude_uW,visibility_ratio,phase_rad,phase_jump,fit_quality_ok,recommended_action
+5,delta,Scandata\current_theta_measurement\delta_current\obs5_probe.txt,5,0,[],[],0.009727944435088419,2352.0802120706726,0.4261520138086721,1.7041503959382283,False,True,ok
+5,sigma,Scandata\current_theta_measurement\sigma_current\obs5_inter_scan.txt,5,2,"[1, 3]","[145.8454, 19.44539]",1.5500820361211307,64.675923799465,0.820541657875801,0.276872323053301,False,False,rescan_sigma
+6,delta,Scandata\current_theta_measurement\delta_current\obs6_probe.txt,5,0,[],[],0.010056523581596654,714.8312025519486,0.21318135994556248,1.5454699739153979,False,True,rescan_delta
+6,sigma,Scandata\current_theta_measurement\sigma_current\obs6_inter_scan.txt,5,3,"[1, 2, 3]","[113.2932, 40.09015, 3.220144]",2.001405891418753,58.52548448267998,0.8215759181886301,0.30435797597171677,False,False,rescan_sigma
+7,delta,Scandata\current_theta_measurement\delta_current\obs7_probe.txt,5,0,[],[],0.015547893536097186,6.066052894651739,0.7834121811371952,2.3634403127536228,False,True,ok
+7,sigma,Scandata\current_theta_measurement\sigma_current\obs7_inter_scan.txt,5,2,"[1, 3]","[10.40769, 0.6407404]",0.5265809466946384,5.075812460510976,0.07614354860008644,0.25236802295078453,False,False,rescan_sigma
+8,delta,Scandata\current_theta_measurement\delta_current\obs8_probe.txt,5,0,[],[],2.5679771309286448,5.151326368725875,13.813672854576025,-3.1233311899665503,True,True,rescan_delta
+8,sigma,Scandata\current_theta_measurement\sigma_current\obs8_inter_scan.txt,5,2,"[2, 3]","[0.1930108, 1.310793]",0.06637832284790415,1.9791710326767624,0.02754088940711379,1.1858466695456134,False,False,rescan_sigma

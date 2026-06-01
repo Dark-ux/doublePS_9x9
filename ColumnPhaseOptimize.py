@@ -79,6 +79,24 @@ class DirectRunConfig:
     line_search_shrink: float = 0.5
     strict_phase_jump: bool = False
     visibility_threshold: float = 0.3
+    enable_scan_outlier_check: bool = True
+    outlier_neighbor_ratio: float = 0.3
+    outlier_residual_sigma: float = 3.0
+    outlier_amplitude_ratio: float = 0.3
+    max_outliers_per_scan: int = 1
+    refit_without_outliers: bool = True
+    enable_prediction_consistency_check: bool = True
+    theta_prediction_error_threshold: float = 0.5
+    delta_prediction_error_threshold: float = 0.5
+    sigma_prediction_error_threshold: float = 0.5
+    stop_on_bad_theta: bool = True
+    enable_auto_rescan: bool = True
+    max_rescan_per_mzi: int = 2
+    rescan_only_failed_mzi: bool = True
+    opm_reads_per_point: int = 3
+    opm_read_interval_s: float = 0.1
+    opm_relative_std_threshold: float = 0.05
+    opm_max_retry_per_point: int = 2
     scan_profile: str = "fast"
     sigma_update_interval: int = 2
     estimated_seconds_per_point: float = 6.5
@@ -250,6 +268,97 @@ def fit_sine_curve(x, y, fix_w=None, init_params=None):
     }
 
 
+def _as_list_text(values):
+    return json.dumps([int(v) if isinstance(v, (np.integer, int)) else float(v) for v in values])
+
+
+def _outlier_setting(args, name, default):
+    return getattr(args, name, default) if args is not None else default
+
+
+def detect_scan_outliers(x, y, fit_result=None, args=None):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    valid_indices = np.where(finite)[0]
+    x_valid = x[finite]
+    y_valid = y[finite]
+    if not parse_bool(_outlier_setting(args, "enable_scan_outlier_check", True)) or y_valid.size < 3:
+        return {"indices": [], "x": [], "y": [], "reason": []}
+
+    neighbor_ratio = float(_outlier_setting(args, "outlier_neighbor_ratio", 0.3))
+    residual_sigma = float(_outlier_setting(args, "outlier_residual_sigma", 3.0))
+    amplitude_ratio = float(_outlier_setting(args, "outlier_amplitude_ratio", 0.3))
+    curve_range = float(np.nanmax(y_valid) - np.nanmin(y_valid)) if y_valid.size else 0.0
+    reasons = {}
+
+    for k in range(1, y_valid.size - 1):
+        neighbor_mean = 0.5 * (y_valid[k - 1] + y_valid[k + 1])
+        jump = abs(y_valid[k] - neighbor_mean)
+        if (
+            jump > neighbor_ratio * max(abs(neighbor_mean), 1e-9)
+            or jump > amplitude_ratio * max(curve_range, 1e-9)
+        ):
+            reasons.setdefault(int(valid_indices[k]), []).append("neighbor_outlier")
+
+    if fit_result is not None and "fitted" in fit_result:
+        fitted = np.asarray(fit_result["fitted"], dtype=float)
+        if fitted.size == y_valid.size:
+            residual = y_valid - fitted
+            residual_std = float(np.nanstd(residual))
+            if residual_std > 0.0 and curve_range > 0.0:
+                for k, value in enumerate(residual):
+                    if (
+                        abs(value) > residual_sigma * residual_std
+                        and abs(value) > amplitude_ratio * curve_range
+                    ):
+                        reasons.setdefault(int(valid_indices[k]), []).append("residual_outlier")
+
+    indices = sorted(reasons)
+    return {
+        "indices": indices,
+        "x": [float(x[int(idx)]) for idx in indices],
+        "y": [float(y[int(idx)]) for idx in indices],
+        "reason": ["+".join(reasons[int(idx)]) for idx in indices],
+    }
+
+
+def fit_sine_curve_robust(x, y, fix_w=None, init_params=None, args=None):
+    first = fit_sine_curve(x, y, fix_w=fix_w, init_params=init_params)
+    outliers = detect_scan_outliers(x, y, fit_result=first, args=args)
+    max_outliers = int(_outlier_setting(args, "max_outliers_per_scan", 1))
+    refit_without_outliers = parse_bool(_outlier_setting(args, "refit_without_outliers", True))
+    fit = first
+    used_outlier_removal = False
+    fit_quality_ok = True
+    outlier_indices = outliers["indices"]
+
+    if len(outlier_indices) > max_outliers:
+        fit_quality_ok = False
+    elif outlier_indices and refit_without_outliers:
+        x_arr = np.asarray(x, dtype=float)
+        y_arr = np.asarray(y, dtype=float)
+        mask = np.ones(x_arr.shape, dtype=bool)
+        mask[outlier_indices] = False
+        if np.count_nonzero(mask & np.isfinite(x_arr) & np.isfinite(y_arr)) >= 4:
+            fit = fit_sine_curve(x_arr[mask], y_arr[mask], fix_w=fix_w, init_params=init_params)
+            used_outlier_removal = True
+        else:
+            fit_quality_ok = False
+
+    fit.update(
+        {
+            "outlier_indices": outlier_indices,
+            "outlier_x": outliers["x"],
+            "outlier_y": outliers["y"],
+            "outlier_reason": outliers["reason"],
+            "used_outlier_removal": bool(used_outlier_removal),
+            "fit_quality_ok": bool(fit_quality_ok),
+        }
+    )
+    return fit
+
+
 def load_scan_file(path):
     path = Path(path)
     df = pd.read_csv(path, sep=None, engine="python")
@@ -276,16 +385,16 @@ def load_scan_file(path):
     return {"path": path, "df": df, "x": x, "y": y, "x_col": x_col, "y_col": y_col}
 
 
-def fit_delta_probe_phase(scan_file, init_w=None, init_params=None):
+def fit_delta_probe_phase(scan_file, init_w=None, init_params=None, args=None):
     scan = load_scan_file(scan_file)
-    fit = fit_sine_curve(scan["x"], scan["y"], fix_w=init_w, init_params=init_params)
+    fit = fit_sine_curve_robust(scan["x"], scan["y"], fix_w=init_w, init_params=init_params, args=args)
     fit["scan_file"] = str(scan_file)
     return fit
 
 
-def fit_sigma_inter_phase(scan_file, fix_w=None, init_params=None):
+def fit_sigma_inter_phase(scan_file, fix_w=None, init_params=None, args=None):
     scan = load_scan_file(scan_file)
-    fit = fit_sine_curve(scan["x"], scan["y"], fix_w=fix_w, init_params=init_params)
+    fit = fit_sine_curve_robust(scan["x"], scan["y"], fix_w=fix_w, init_params=init_params, args=args)
     fit["scan_file"] = str(scan_file)
     return fit
 
@@ -358,7 +467,7 @@ def load_initial_theta(args, theta_labels, run_dir=None):
     cur_ready = bool(args.current_dir) and Path(args.current_dir).exists()
     if ref_ready and cur_ready:
         out_csv = Path(run_dir) / "current_theta_second_column.csv" if run_dir else "current_theta_second_column.csv"
-        measure_current_theta(args.reference_dir, args.current_dir, out_csv=out_csv)
+        measure_current_theta(args.reference_dir, args.current_dir, out_csv=out_csv, args=args)
         return load_current_theta_csv(out_csv, theta_labels)
 
     if getattr(args, "assume_reference_zero", False):
@@ -1003,12 +1112,328 @@ def save_current_theta_outputs(out_csv, theta_labels, theta_values, details, sum
     return out_csv, detail_path, summary_path
 
 
+def _fit_quality_columns(prefix, fit=None):
+    fit = fit or {}
+    return {
+        f"{prefix}_outlier_indices": _as_list_text(fit.get("outlier_indices", [])),
+        f"{prefix}_outlier_x": json.dumps([float(v) for v in fit.get("outlier_x", [])]),
+        f"{prefix}_outlier_y": json.dumps([float(v) for v in fit.get("outlier_y", [])]),
+        f"{prefix}_outlier_reason": json.dumps([str(v) for v in fit.get("outlier_reason", [])]),
+        f"{prefix}_used_outlier_removal": bool(fit.get("used_outlier_removal", False)),
+        f"{prefix}_fit_quality_ok": bool(fit.get("fit_quality_ok", False)) if fit else False,
+    }
+
+
+def load_current_theta_summary_for_csv(theta_csv):
+    if theta_csv is None:
+        return {}
+    summary_path = Path(theta_csv).with_name("current_theta_summary.json")
+    if not summary_path.exists():
+        return {}
+    with summary_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def mirror_current_theta_measurement(src_dir, latest_dir):
+    src_dir = Path(src_dir)
+    latest_dir = Path(latest_dir)
+    if not src_dir.exists() or src_dir.resolve() == latest_dir.resolve():
+        return
+    if latest_dir.exists():
+        shutil.rmtree(latest_dir)
+    shutil.copytree(src_dir, latest_dir)
+
+
+def check_prediction_consistency(
+    theta_prev,
+    theta_current,
+    delta_P_applied,
+    J_theta,
+    theta_labels,
+    mzi_ids,
+    out_dir=None,
+    args=None,
+):
+    if not parse_bool(_outlier_setting(args, "enable_prediction_consistency_check", True)):
+        result = {
+            "ok": True,
+            "prediction_inconsistent_mzi_ids": [],
+            "prediction_inconsistent_parts": [],
+            "rows": [],
+        }
+        return result
+
+    theta_prev = np.asarray(theta_prev, dtype=float)
+    theta_current = np.asarray(theta_current, dtype=float)
+    delta_P_applied = np.asarray(delta_P_applied, dtype=float)
+    J_theta = np.asarray(J_theta, dtype=float)
+    delta_theta_pred = J_theta @ delta_P_applied
+    delta_theta_meas = wrap_to_pi(theta_current - theta_prev)
+    theta_residual = wrap_to_pi(delta_theta_meas - delta_theta_pred)
+    theta_threshold = float(_outlier_setting(args, "theta_prediction_error_threshold", 0.5))
+    delta_threshold = float(_outlier_setting(args, "delta_prediction_error_threshold", 0.5))
+    sigma_threshold = float(_outlier_setting(args, "sigma_prediction_error_threshold", 0.5))
+    rows = []
+    bad_mzis = set()
+    bad_parts = set()
+
+    for label, pred, measured, residual in zip(theta_labels, delta_theta_pred, delta_theta_meas, theta_residual):
+        passed = bool(abs(residual) <= theta_threshold)
+        name = str(label)
+        mzi_text = name.replace("theta", "")[:-1] if name.startswith("theta") else ""
+        if not passed and mzi_text:
+            bad_mzis.add(int(mzi_text))
+            bad_parts.add(name)
+        rows.append(
+            {
+                "type": "theta_component",
+                "name": name,
+                "pred": float(pred),
+                "measured": float(measured),
+                "residual": float(residual),
+                "threshold": theta_threshold,
+                "pass": passed,
+                "suspicious_part": "" if passed else name,
+            }
+        )
+
+    for idx, mzi_id in enumerate(mzi_ids):
+        u = 2 * idx
+        d = u + 1
+        delta_prev = theta_prev[u] - theta_prev[d]
+        delta_cur = theta_current[u] - theta_current[d]
+        delta_delta_pred = delta_theta_pred[u] - delta_theta_pred[d]
+        delta_delta_meas = wrap_to_pi(delta_cur - delta_prev)
+        delta_delta_residual = wrap_to_pi(delta_delta_meas - delta_delta_pred)
+        delta_pass = bool(abs(delta_delta_residual) <= delta_threshold)
+        if not delta_pass:
+            bad_mzis.add(int(mzi_id))
+            bad_parts.add("Delta")
+        rows.append(
+            {
+                "type": "delta_mzi",
+                "name": f"MZI{int(mzi_id)}",
+                "pred": float(delta_delta_pred),
+                "measured": float(delta_delta_meas),
+                "residual": float(delta_delta_residual),
+                "threshold": delta_threshold,
+                "pass": delta_pass,
+                "suspicious_part": "" if delta_pass else "Delta",
+            }
+        )
+
+        sigma_prev = theta_prev[u] + theta_prev[d]
+        sigma_cur = theta_current[u] + theta_current[d]
+        delta_sigma_pred = delta_theta_pred[u] + delta_theta_pred[d]
+        delta_sigma_meas = wrap_to_pi(sigma_cur - sigma_prev)
+        delta_sigma_residual = wrap_to_pi(delta_sigma_meas - delta_sigma_pred)
+        sigma_pass = bool(abs(delta_sigma_residual) <= sigma_threshold)
+        if not sigma_pass:
+            bad_mzis.add(int(mzi_id))
+            bad_parts.add("Sigma")
+        rows.append(
+            {
+                "type": "sigma_mzi",
+                "name": f"MZI{int(mzi_id)}",
+                "pred": float(delta_sigma_pred),
+                "measured": float(delta_sigma_meas),
+                "residual": float(delta_sigma_residual),
+                "threshold": sigma_threshold,
+                "pass": sigma_pass,
+                "suspicious_part": "" if sigma_pass else "Sigma",
+            }
+        )
+
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(out_dir / "prediction_consistency.csv", index=False)
+    return {
+        "ok": bool(all(row["pass"] for row in rows)),
+        "prediction_inconsistent_mzi_ids": sorted(bad_mzis),
+        "prediction_inconsistent_parts": sorted(bad_parts),
+        "rows": rows,
+    }
+
+
+def write_iteration_failure(run_dir, k, reason, summary=None):
+    data = {
+        "iter": int(k),
+        "stopped_by_measurement_quality": True,
+        "failure_reason": reason,
+        "current_theta_summary": summary or {},
+    }
+    path = Path(run_dir) / f"iter_{int(k):03d}_failure_summary.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return data
+
+
+def measurement_quality_failure_reason(theta, summary, args):
+    if np.isnan(np.asarray(theta, dtype=float)).any():
+        return "current_theta contains NaN"
+    if not summary:
+        return ""
+    if summary.get("allow_hardware_update") is False:
+        return "current_theta_summary allow_hardware_update=false"
+    if summary.get("scan_quality_ok") is False:
+        return "current_theta_summary scan_quality_ok=false"
+    if summary.get("prediction_consistency_ok") is False:
+        return "prediction_consistency_ok=false"
+    if parse_bool(getattr(args, "strict_phase_jump", False)) and summary.get("phase_jump_mzi_ids"):
+        return "strict_phase_jump=true and phase jump detected"
+    return ""
+
+
+def plot_fit_diagnostic(scan_file, fit, out_path, title):
+    x = np.asarray(fit.get("x", []), dtype=float)
+    y = np.asarray(fit.get("y", []), dtype=float)
+    fitted = np.asarray(fit.get("fitted", []), dtype=float)
+    outlier_indices = [int(v) for v in fit.get("outlier_indices", [])]
+    plt.figure(figsize=(7, 4.5))
+    plt.plot(x, y, "o", label="raw")
+    if fitted.size == x.size:
+        order = np.argsort(x)
+        plt.plot(x[order], fitted[order], "-", label="fit")
+    if outlier_indices:
+        valid = [idx for idx in outlier_indices if 0 <= idx < x.size]
+        if valid:
+            plt.plot(x[valid], y[valid], "rx", markersize=9, label="outlier")
+    plt.title(
+        f"{title}\nphase={float(fit.get('phi', np.nan)):.4f}, "
+        f"RMSE={float(fit.get('rmse_uW', np.nan)):.4g}, outliers={len(outlier_indices)}"
+    )
+    plt.xlabel("scan axis")
+    plt.ylabel("optical power (uW)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
+def diagnose_theta_measurement(args):
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fit_dir = out_dir / "fit_diagnostics"
+    fit_dir.mkdir(parents=True, exist_ok=True)
+    theta_csv = out_dir / "current_theta_second_column.csv"
+    theta_values, details, summary = measure_current_theta(
+        args.reference_dir,
+        args.current_dir,
+        out_csv=theta_csv,
+        strict_phase_jump=getattr(args, "strict_phase_jump", False),
+        visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+        args=args,
+    )
+    reference = load_theta_reference(args.reference_dir)
+    current_dir = Path(args.current_dir)
+    rows = []
+    for row in details:
+        mzi_id = int(row["mzi_id"])
+        key = str(mzi_id)
+        for scan_type, scan_file, ref_key, phase_name, fit_func in (
+            (
+                "delta",
+                current_dir / "delta_current" / f"obs{key}_probe.txt",
+                "delta_fit",
+                "eta",
+                lambda path: fit_delta_probe_phase(
+                    path,
+                    init_w=float(reference["delta_w_ref"][key]),
+                    init_params={
+                        "A": reference["delta_fit"][key]["A"],
+                        "phi": reference["delta_fit"][key]["eta"],
+                        "b": reference["delta_fit"][key]["b"],
+                    },
+                    args=args,
+                ),
+            ),
+            (
+                "sigma",
+                current_dir / "sigma_current" / f"obs{key}_inter_scan.txt",
+                "sigma_fit",
+                "beta",
+                lambda path: fit_sigma_inter_phase(
+                    path,
+                    fix_w=float(reference["sigma_w_ref"][key]),
+                    init_params={
+                        "A": reference["sigma_fit"][key]["A"],
+                        "phi": reference["sigma_fit"][key]["beta"],
+                        "b": reference["sigma_fit"][key]["b"],
+                    },
+                    args=args,
+                ),
+            ),
+        ):
+            try:
+                fit = fit_func(scan_file)
+                amplitude_ref = float(reference[ref_key][key]["A"])
+                visibility_ratio = float(fit["A"] / max(abs(amplitude_ref), 1e-9))
+                phase_jump = abs(wrap_to_pi(float(fit["phi"]) - float(reference[f"{scan_type}_{phase_name}_ref"][key]))) > np.pi / 2
+                recommended = "ok"
+                if fit.get("used_outlier_removal"):
+                    recommended = "refit_without_outlier"
+                if not fit.get("fit_quality_ok", True):
+                    recommended = "rescan_delta" if scan_type == "delta" else "rescan_sigma"
+                if visibility_ratio < float(getattr(args, "visibility_threshold", 0.3)) or phase_jump:
+                    recommended = "rescan_delta" if scan_type == "delta" else "rescan_sigma"
+                plot_fit_diagnostic(
+                    scan_file,
+                    fit,
+                    fit_dir / f"mzi{mzi_id}_{scan_type}.png",
+                    f"MZI{mzi_id} {scan_type} {scan_file.name}",
+                )
+                rows.append(
+                    {
+                        "mzi_id": mzi_id,
+                        "scan_type": scan_type,
+                        "scan_file": str(scan_file),
+                        "point_count": int(len(fit.get("y", []))),
+                        "outlier_count": int(len(fit.get("outlier_indices", []))),
+                        "outlier_indices": _as_list_text(fit.get("outlier_indices", [])),
+                        "outlier_values": json.dumps([float(v) for v in fit.get("outlier_y", [])]),
+                        "rmse_uW": float(fit.get("rmse_uW", np.nan)),
+                        "amplitude_uW": float(fit.get("A", np.nan)),
+                        "visibility_ratio": visibility_ratio,
+                        "phase_rad": float(fit.get("phi", np.nan)),
+                        "phase_jump": bool(phase_jump),
+                        "fit_quality_ok": bool(fit.get("fit_quality_ok", True)),
+                        "recommended_action": recommended,
+                    }
+                )
+            except Exception as exc:
+                rows.append(
+                    {
+                        "mzi_id": mzi_id,
+                        "scan_type": scan_type,
+                        "scan_file": str(scan_file),
+                        "point_count": 0,
+                        "outlier_count": 0,
+                        "outlier_indices": "[]",
+                        "outlier_values": "[]",
+                        "rmse_uW": np.nan,
+                        "amplitude_uW": np.nan,
+                        "visibility_ratio": np.nan,
+                        "phase_rad": np.nan,
+                        "phase_jump": False,
+                        "fit_quality_ok": False,
+                        "recommended_action": "stop_iteration",
+                        "warning": str(exc),
+                    }
+                )
+    pd.DataFrame(rows).to_csv(out_dir / "scan_quality_report.csv", index=False)
+    run_log(f"[ColumnPhaseOptimize] diagnose_theta_measurement saved outputs to {out_dir}")
+    return theta_values, rows, summary
+
+
 def measure_current_theta_from_files(
     reference_dir,
     current_dir,
     out_csv="current_theta_second_column.csv",
     strict_phase_jump=False,
     visibility_threshold=0.3,
+    args=None,
 ):
     reference = load_theta_reference(reference_dir)
     mzi_ids = [int(x) for x in reference["mzi_ids"]]
@@ -1024,6 +1449,9 @@ def measure_current_theta_from_files(
     failed_mzi_ids = set()
     low_visibility_mzi_ids = set()
     phase_jump_mzi_ids = set()
+    outlier_mzi_ids = set()
+    outlier_scan_types = set()
+    scan_quality_ok = True
     strict_phase_jump = parse_bool(strict_phase_jump)
     visibility_threshold = float(visibility_threshold)
 
@@ -1039,18 +1467,34 @@ def measure_current_theta_from_files(
         delta_beta = np.nan
         sigma_rmse = np.nan
         delta_sigma = np.nan
+        delta_fit = None
+        sigma_fit = None
+        delta_rescan_count = 0
+        sigma_rescan_count = 0
+        final_delta_scan_file = str(delta_dir / f"obs{key}_probe.txt")
+        final_sigma_scan_file = str(sigma_dir / f"obs{key}_inter_scan.txt")
 
         try:
             delta_ref = reference["delta_fit"][key]
             delta_fit = fit_delta_probe_phase(
-                delta_dir / f"obs{key}_probe.txt",
+                final_delta_scan_file,
                 init_w=float(reference["delta_w_ref"][key]),
                 init_params={"A": delta_ref["A"], "phi": delta_ref["eta"], "b": delta_ref["b"]},
+                args=args,
             )
             eta_cur = float(delta_fit["phi"])
             delta_rmse = float(delta_fit["rmse_uW"])
             delta_eta = wrap_to_pi(eta_cur - float(reference["delta_eta_ref"][key]))
             delta_delta = delta_eta if probe_arm == "u" else -delta_eta
+            if delta_fit.get("outlier_indices"):
+                outlier_mzi_ids.add(int(mzi_id))
+                outlier_scan_types.add("Delta")
+            if delta_fit.get("used_outlier_removal"):
+                row_warning.append("Delta outlier removed and refit")
+            if not delta_fit.get("fit_quality_ok", True):
+                row_warning.append("Delta too many outliers, fit unreliable")
+                failed_mzi_ids.add(int(mzi_id))
+                scan_quality_ok = False
             if abs(delta_eta) > np.pi / 2:
                 row_warning.append("Delta phase jump may be too large")
                 phase_jump_mzi_ids.add(int(mzi_id))
@@ -1060,13 +1504,15 @@ def measure_current_theta_from_files(
         except Exception as exc:
             row_warning.append(f"Delta fit failed: {exc}")
             failed_mzi_ids.add(int(mzi_id))
+            scan_quality_ok = False
 
         try:
             sigma_ref = reference["sigma_fit"][key]
             sigma_fit = fit_sigma_inter_phase(
-                sigma_dir / f"obs{key}_inter_scan.txt",
+                final_sigma_scan_file,
                 fix_w=float(reference["sigma_w_ref"][key]),
                 init_params={"A": sigma_ref["A"], "phi": sigma_ref["beta"], "b": sigma_ref["b"]},
+                args=args,
             )
             beta_cur = float(sigma_fit["phi"])
             sigma_rmse = float(sigma_fit["rmse_uW"])
@@ -1075,6 +1521,15 @@ def measure_current_theta_from_files(
             if key not in reference.get("sigma_coeff", {}):
                 row_warning.append("sigma_coeff missing; default c=2")
             delta_sigma = coeff * delta_beta
+            if sigma_fit.get("outlier_indices"):
+                outlier_mzi_ids.add(int(mzi_id))
+                outlier_scan_types.add("Sigma")
+            if sigma_fit.get("used_outlier_removal"):
+                row_warning.append("Sigma outlier removed and refit")
+            if not sigma_fit.get("fit_quality_ok", True):
+                row_warning.append("Sigma too many outliers, fit unreliable")
+                failed_mzi_ids.add(int(mzi_id))
+                scan_quality_ok = False
             if abs(delta_beta) > np.pi / 2:
                 row_warning.append("Sigma phase jump may be too large")
                 phase_jump_mzi_ids.add(int(mzi_id))
@@ -1085,6 +1540,7 @@ def measure_current_theta_from_files(
             coeff = float(reference.get("sigma_coeff", {}).get(key, 2.0))
             row_warning.append(f"Sigma fit failed: {exc}")
             failed_mzi_ids.add(int(mzi_id))
+            scan_quality_ok = False
 
         delta_dict[key] = delta_delta
         sigma_dict[key] = delta_sigma
@@ -1110,6 +1566,12 @@ def measure_current_theta_from_files(
                 "theta_d": theta_d,
                 "delta_fit_rmse_uW": delta_rmse,
                 "sigma_fit_rmse_uW": sigma_rmse,
+                **_fit_quality_columns("delta", delta_fit),
+                **_fit_quality_columns("sigma", sigma_fit),
+                "delta_rescan_count": int(delta_rescan_count),
+                "sigma_rescan_count": int(sigma_rescan_count),
+                "final_delta_scan_file": final_delta_scan_file,
+                "final_sigma_scan_file": final_sigma_scan_file,
                 "warning": warning_text,
             }
         )
@@ -1121,6 +1583,10 @@ def measure_current_theta_from_files(
         allow_hardware_update = False
     if strict_phase_jump and phase_jump_mzi_ids:
         allow_hardware_update = False
+    if not scan_quality_ok:
+        allow_hardware_update = False
+    if valid_theta_count != len(theta_values):
+        allow_hardware_update = False
     summary = {
         "max_abs_theta": float(np.nanmax(np.abs(theta_values))) if np.isfinite(theta_values).any() else np.nan,
         "mzi_ids": mzi_ids,
@@ -1130,6 +1596,9 @@ def measure_current_theta_from_files(
         "failed_mzi_ids": sorted(failed_mzi_ids),
         "low_visibility_mzi_ids": sorted(low_visibility_mzi_ids),
         "phase_jump_mzi_ids": sorted(phase_jump_mzi_ids),
+        "scan_quality_ok": bool(scan_quality_ok and not failed_mzi_ids),
+        "outlier_mzi_ids": sorted(outlier_mzi_ids),
+        "outlier_scan_types": sorted(outlier_scan_types),
         "strict_phase_jump": bool(strict_phase_jump),
         "visibility_threshold": visibility_threshold,
         "allow_hardware_update": allow_hardware_update,
@@ -1626,6 +2095,7 @@ def measure_current_theta(
     out_csv="current_theta_second_column.csv",
     strict_phase_jump=False,
     visibility_threshold=0.3,
+    args=None,
 ):
     return measure_current_theta_from_files(
         reference_dir,
@@ -1633,6 +2103,7 @@ def measure_current_theta(
         out_csv=out_csv,
         strict_phase_jump=strict_phase_jump,
         visibility_threshold=visibility_threshold,
+        args=args,
     )
 
 
@@ -1705,6 +2176,46 @@ def read_opm_power_uW(cu, opm, output_channel):
     if idx < 0 or idx >= len(values):
         raise IndexError(f"Output channel {output_channel} not available from OPM readout.")
     return float(values[idx]) * 1e6
+
+
+def read_opm_power_uW_repeated(cu, opm, output_channel, reads, interval_s):
+    values = []
+    for idx in range(max(1, int(reads))):
+        values.append(read_opm_power_uW(cu, opm, output_channel))
+        if idx + 1 < max(1, int(reads)):
+            time.sleep(float(interval_s))
+    arr = np.asarray(values, dtype=float)
+    median = float(np.median(arr))
+    mean = float(np.mean(arr))
+    std = float(np.std(arr))
+    return {
+        "opm_raw_uW": json.dumps([float(v) for v in arr]),
+        "opm_mean_uW": mean,
+        "opm_std_uW": std,
+        "opm_median_uW": median,
+        "opm_relative_std": float(std / max(abs(mean), 1e-9)),
+        "opm_read_count": int(arr.size),
+    }
+
+
+def read_stable_opm_point(cu, opm, output_channel, args):
+    warning = ""
+    result = None
+    max_retry = int(getattr(args, "opm_max_retry_per_point", 2))
+    threshold = float(getattr(args, "opm_relative_std_threshold", 0.05))
+    for attempt in range(max_retry + 1):
+        result = read_opm_power_uW_repeated(
+            cu,
+            opm,
+            output_channel,
+            getattr(args, "opm_reads_per_point", 3),
+            getattr(args, "opm_read_interval_s", 0.1),
+        )
+        if result["opm_relative_std"] <= threshold:
+            break
+        warning = "unstable OPM reading"
+    result["warning"] = warning
+    return result
 
 
 def upload_working_data_checked(cu, mcv, working_data, voltage_limit_v, context_label="unspecified"):
@@ -1814,7 +2325,9 @@ def scan_delta_probe_current(
             context_label=f"delta current probe: MZI{observed_mzi}{probe_arm}, offset={float(offset):+.6f} W",
         )
         time.sleep(float(args.settle_time))
-        optical_power = read_opm_power_uW(hardware["cu"], hardware["opm2"], output_channel)
+        opm_stats = read_stable_opm_point(hardware["cu"], hardware["opm2"], output_channel, args)
+        if opm_stats["warning"]:
+            warning = "; ".join([text for text in (warning, opm_stats["warning"]) if text])
         rows.append(
             {
                 "mzi_id": int(observed_mzi),
@@ -1825,7 +2338,13 @@ def scan_delta_probe_current(
                 "target_power_w": float(target_power),
                 "measured_power_w": float(target_power),
                 "voltage_v": float(voltage),
-                "optical_power_uW": float(optical_power),
+                "optical_power_uW": float(opm_stats["opm_median_uW"]),
+                "opm_raw_uW": opm_stats["opm_raw_uW"],
+                "opm_mean_uW": float(opm_stats["opm_mean_uW"]),
+                "opm_std_uW": float(opm_stats["opm_std_uW"]),
+                "opm_median_uW": float(opm_stats["opm_median_uW"]),
+                "opm_relative_std": float(opm_stats["opm_relative_std"]),
+                "opm_read_count": int(opm_stats["opm_read_count"]),
                 "input_channel": int(input_channel),
                 "output_channel": int(output_channel),
                 "scan_type": "delta_current_probe",
@@ -1910,13 +2429,21 @@ def scan_sigma_current(
             context_label=f"sigma current scan: MZI{target}, dp={float(dp):.6f} rad",
         )
         time.sleep(float(args.settle_time))
-        optical_power = read_opm_power_uW(hardware["cu"], hardware["opm2"], int(output_idx) + 1)
+        opm_stats = read_stable_opm_point(hardware["cu"], hardware["opm2"], int(output_idx) + 1, args)
+        if opm_stats["warning"]:
+            warning = "; ".join([text for text in (warning, opm_stats["warning"]) if text])
         rows.append(
             {
                 "target": target,
                 "observed_mzi": target,
                 "dp": float(dp),
-                "pow(uW)": float(optical_power),
+                "pow(uW)": float(opm_stats["opm_median_uW"]),
+                "opm_raw_uW": opm_stats["opm_raw_uW"],
+                "opm_mean_uW": float(opm_stats["opm_mean_uW"]),
+                "opm_std_uW": float(opm_stats["opm_std_uW"]),
+                "opm_median_uW": float(opm_stats["opm_median_uW"]),
+                "opm_relative_std": float(opm_stats["opm_relative_std"]),
+                "opm_read_count": int(opm_stats["opm_read_count"]),
                 "v_primary": float(v_upper),
                 "v_secondary": float(v_lower),
                 "p_primary": float(p_upper),
@@ -2011,6 +2538,83 @@ def acquire_current_theta_scans(base_working_data, hardware, mzi_table, args, cu
     return current_dir
 
 
+def identify_rescan_targets(details, consistency=None):
+    targets = {}
+    for row in details or []:
+        mzi_id = int(row.get("mzi_id"))
+        warning = str(row.get("warning", ""))
+        if not bool(row.get("delta_fit_quality_ok", True)) or "Delta" in warning:
+            if any(text in warning for text in ("Delta too many outliers", "Delta fit failed", "Delta phase jump", "Delta low visibility")):
+                targets.setdefault(mzi_id, set()).add("Delta")
+        if not bool(row.get("sigma_fit_quality_ok", True)) or "Sigma" in warning:
+            if any(text in warning for text in ("Sigma too many outliers", "Sigma fit failed", "Sigma phase jump", "Sigma low visibility")):
+                targets.setdefault(mzi_id, set()).add("Sigma")
+    if consistency:
+        for row in consistency.get("rows", []):
+            if row.get("pass", True):
+                continue
+            name = str(row.get("name", ""))
+            if name.startswith("MZI"):
+                mzi_id = int(name[3:])
+                part = row.get("suspicious_part")
+                if part in {"Delta", "Sigma"}:
+                    targets.setdefault(mzi_id, set()).add(part)
+    return {mzi_id: sorted(parts) for mzi_id, parts in targets.items()}
+
+
+def _preserve_initial_scan(path):
+    path = Path(path)
+    if not path.exists():
+        return
+    initial_path = path.with_name(f"{path.stem}_initial{path.suffix}")
+    if not initial_path.exists():
+        shutil.copy2(path, initial_path)
+
+
+def rescan_current_theta_targets(base_working_data, hardware, mzi_table, args, current_dir, targets, rescan_index):
+    current_dir = Path(current_dir)
+    probe_map = parse_probe_map(getattr(args, "probe_map", ""), parse_csv_list(args.mzi_ids, int))
+    base_snapshot = base_working_data.copy(deep=True)
+    for mzi_id, parts in targets.items():
+        if "Delta" in parts:
+            delta_dir = current_dir / "delta_current"
+            canonical = delta_dir / f"obs{int(mzi_id)}_probe.txt"
+            _preserve_initial_scan(canonical)
+            tmp_dir = delta_dir / "_rescan_tmp"
+            scan_path = scan_delta_probe_current(
+                int(mzi_id),
+                probe_map[str(int(mzi_id))],
+                tmp_dir,
+                base_snapshot,
+                hardware,
+                mzi_table,
+                args,
+            )
+            rescan_path = delta_dir / f"obs{int(mzi_id)}_probe_rescan{int(rescan_index)}.txt"
+            shutil.copy2(scan_path, rescan_path)
+            shutil.copy2(rescan_path, canonical)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        if "Sigma" in parts:
+            sigma_dir = current_dir / "sigma_current"
+            canonical = sigma_dir / f"obs{int(mzi_id)}_inter_scan.txt"
+            _preserve_initial_scan(canonical)
+            tmp_dir = sigma_dir / "_rescan_tmp"
+            scan_path = scan_sigma_current(int(mzi_id), tmp_dir, base_snapshot, hardware, mzi_table, args)
+            rescan_path = sigma_dir / f"obs{int(mzi_id)}_inter_scan_rescan{int(rescan_index)}.txt"
+            shutil.copy2(scan_path, rescan_path)
+            shutil.copy2(rescan_path, canonical)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    base_working_data.iloc[:, 0] = base_snapshot.iloc[:, 0].to_numpy(copy=True)
+    upload_working_data_checked(
+        hardware["cu"],
+        hardware["mcv"],
+        base_working_data,
+        args.voltage_limit_v,
+        context_label=f"rescan {rescan_index}: restore optimized second-column state",
+    )
+
+
 def iterate(args):
     validate_initial_state(args)
     if not args.dry_run and not parse_bool(getattr(args, "confirm_hardware", False)):
@@ -2064,6 +2668,8 @@ def iterate(args):
     log_rows = []
     power_rows = []
     theta_rows = []
+    stopped_by_measurement_quality = False
+    failure_reason = ""
 
     hardware = None
     working_data = None
@@ -2090,6 +2696,7 @@ def iterate(args):
     ref_ready_initial = bool(args.reference_dir) and (Path(args.reference_dir) / "theta_reference.json").exists()
     if resumed_theta is not None:
         theta = resumed_theta
+        current_theta_summary = {}
     elif not args.dry_run and getattr(args, "auto_measure_current_theta", False) and ref_ready_initial:
         args._current_iter_label = "initial"
         acquire_current_theta_scans(working_data, hardware, mzi_table, args, args.current_dir)
@@ -2100,11 +2707,14 @@ def iterate(args):
             out_csv=theta_csv,
             strict_phase_jump=getattr(args, "strict_phase_jump", False),
             visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+            args=args,
         )
         theta = load_current_theta_csv(theta_csv, theta_labels)
+        current_theta_summary = load_current_theta_summary_for_csv(theta_csv)
     else:
         try:
             theta = load_initial_theta(args, theta_labels, run_dir=run_dir)
+            current_theta_summary = load_current_theta_summary_for_csv(current_theta_path or (run_dir / "current_theta_second_column.csv"))
         except FileNotFoundError:
             if args.dry_run or not getattr(args, "auto_measure_current_theta", False):
                 raise
@@ -2117,8 +2727,10 @@ def iterate(args):
                 out_csv=theta_csv,
                 strict_phase_jump=getattr(args, "strict_phase_jump", False),
                 visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+                args=args,
             )
             theta = load_current_theta_csv(theta_csv, theta_labels)
+            current_theta_summary = load_current_theta_summary_for_csv(theta_csv)
 
     for k in range(start_iter, args.max_iter):
         run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: evaluate current theta and model output")
@@ -2180,7 +2792,53 @@ def iterate(args):
                     "output_converged": output_converged,
                     "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
                     "converged": True,
+                    "current_theta_measurement_dir": current_theta_summary.get("current_dir", ""),
+                    "prediction_consistency_ok": current_theta_summary.get("prediction_consistency_ok", ""),
+                    "prediction_inconsistent_mzi_ids": json.dumps(current_theta_summary.get("prediction_inconsistent_mzi_ids", [])),
+                    "prediction_inconsistent_parts": json.dumps(current_theta_summary.get("prediction_inconsistent_parts", [])),
+                    "current_theta_warnings": json.dumps(current_theta_summary.get("warnings", [])),
                     "warning": "",
+                }
+            )
+            break
+
+        failure_reason = measurement_quality_failure_reason(theta, current_theta_summary, args)
+        if parse_bool(getattr(args, "stop_on_bad_theta", True)) and failure_reason:
+            stopped_by_measurement_quality = True
+            failure_summary = write_iteration_failure(run_dir, k, failure_reason, current_theta_summary)
+            run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: stopped before plan_update: {failure_reason}")
+            log_rows.append(
+                {
+                    "iter": k,
+                    "max_abs_theta_error_rad": float(np.max(np.abs(error))),
+                    "norm_theta_error": float(np.linalg.norm(error)),
+                    "model_output_rmse": output_metrics["rmse"],
+                    "model_output_mae": output_metrics["mae"],
+                    "model_output_max_abs": output_metrics["max_abs"],
+                    "measured_output_rmse": "" if measured_metrics is None else measured_metrics["rmse"],
+                    "measured_output_mae": "" if measured_metrics is None else measured_metrics["mae"],
+                    "measured_output_max_abs": "" if measured_metrics is None else measured_metrics["max_abs"],
+                    "alpha_used": "",
+                    "lambda_reg": args.lambda_reg,
+                    "line_search_metric": getattr(args, "line_search_metric", "theta"),
+                    "step_scale": "",
+                    "num_clipped": "",
+                    "num_voltage_clipped": "",
+                    "allow_hardware_update": False,
+                    "theta_source": getattr(args, "theta_update_mode", "measured_manual"),
+                    "current_theta_measurement_dir": current_theta_summary.get("current_dir", ""),
+                    "prediction_consistency_ok": current_theta_summary.get("prediction_consistency_ok", ""),
+                    "prediction_inconsistent_mzi_ids": json.dumps(current_theta_summary.get("prediction_inconsistent_mzi_ids", [])),
+                    "prediction_inconsistent_parts": json.dumps(current_theta_summary.get("prediction_inconsistent_parts", [])),
+                    "current_theta_warnings": json.dumps(current_theta_summary.get("warnings", [])),
+                    "scan_profile": getattr(args, "scan_profile", "fast"),
+                    **scan_info,
+                    "actual_measure_time_s": float(actual_measure_time_s),
+                    "theta_converged": theta_converged,
+                    "output_converged": output_converged,
+                    "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
+                    "converged": False,
+                    "warning": failure_summary["failure_reason"],
                 }
             )
             break
@@ -2222,6 +2880,12 @@ def iterate(args):
             "num_clipped": int(np.sum(plan["clipped"])),
             "num_voltage_clipped": int(np.sum(update_df["clipped"].to_numpy(dtype=bool))),
             "allow_hardware_update": bool(np.isfinite(theta).all()),
+            "current_theta_measurement_dir": current_theta_summary.get("current_dir", ""),
+            "scan_quality_ok": current_theta_summary.get("scan_quality_ok", ""),
+            "prediction_consistency_ok": current_theta_summary.get("prediction_consistency_ok", ""),
+            "prediction_inconsistent_mzi_ids": current_theta_summary.get("prediction_inconsistent_mzi_ids", []),
+            "prediction_inconsistent_parts": current_theta_summary.get("prediction_inconsistent_parts", []),
+            "current_theta_warnings": current_theta_summary.get("warnings", []),
             "theta_converged": theta_converged,
             "output_converged": output_converged,
             "convergence_mode": getattr(args, "convergence_mode", "theta_only"),
@@ -2230,6 +2894,8 @@ def iterate(args):
         }
         with (run_dir / f"iter_{k:03d}_summary.json").open("w", encoding="utf-8") as f:
             json.dump(iter_summary, f, indent=2)
+        theta_before_update = np.array(theta, dtype=float, copy=True)
+        delta_P_applied = np.asarray(plan["P_next"] - P, dtype=float)
         if not args.dry_run:
             upload_second_column_voltages(
                 working_data,
@@ -2253,36 +2919,121 @@ def iterate(args):
                     "then press Enter to continue..."
                 )
                 theta = load_current_theta_csv(current_theta_path, theta_labels)
+                current_theta_summary = load_current_theta_summary_for_csv(current_theta_path)
             elif theta_update_mode == "measured_auto" or getattr(args, "auto_measure_current_theta", False):
                 if not ref_ready:
                     ensure_theta_reference(args.reference_dir, args, mzi_ids)
                 args._current_iter_label = f"{k + 1}/{args.max_iter}"
                 args._current_iter_index = k
+                iter_dir = run_dir / f"iter_{k:03d}"
+                iter_current_dir = iter_dir / "current_theta_measurement"
                 measure_start = time.perf_counter()
-                acquire_current_theta_scans(working_data, hardware, mzi_table, args, args.current_dir)
+                acquire_current_theta_scans(working_data, hardware, mzi_table, args, iter_current_dir)
+                if getattr(args, "current_dir", None):
+                    mirror_current_theta_measurement(iter_current_dir, args.current_dir)
                 actual_measure_time_s = time.perf_counter() - measure_start
-                theta_csv = run_dir / f"iter_{k:03d}_measured_theta.csv"
-                measure_current_theta(
+                theta_csv = iter_dir / "current_theta_second_column.csv"
+                theta_values, theta_details, current_theta_summary = measure_current_theta(
                     args.reference_dir,
-                    args.current_dir,
+                    iter_current_dir,
                     out_csv=theta_csv,
                     strict_phase_jump=getattr(args, "strict_phase_jump", False),
                     visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+                    args=args,
                 )
-                theta = load_current_theta_csv(theta_csv, theta_labels)
+                theta = np.asarray(theta_values, dtype=float)
+                consistency = check_prediction_consistency(
+                    theta_before_update,
+                    theta,
+                    delta_P_applied,
+                    J,
+                    theta_labels,
+                    mzi_ids,
+                    out_dir=iter_dir,
+                    args=args,
+                )
+                rescan_counts = {}
+                if parse_bool(getattr(args, "enable_auto_rescan", True)):
+                    for rescan_index in range(1, int(getattr(args, "max_rescan_per_mzi", 2)) + 1):
+                        targets = identify_rescan_targets(theta_details, consistency)
+                        if not targets:
+                            break
+                        for target_mzi, parts in targets.items():
+                            entry = rescan_counts.setdefault(int(target_mzi), {"Delta": 0, "Sigma": 0})
+                            for part in parts:
+                                entry[part] += 1
+                        run_log(
+                            f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: "
+                            f"auto rescan {rescan_index} targets={targets}"
+                        )
+                        rescan_current_theta_targets(
+                            working_data,
+                            hardware,
+                            mzi_table,
+                            args,
+                            iter_current_dir,
+                            targets,
+                            rescan_index,
+                        )
+                        theta_values, theta_details, current_theta_summary = measure_current_theta(
+                            args.reference_dir,
+                            iter_current_dir,
+                            out_csv=theta_csv,
+                            strict_phase_jump=getattr(args, "strict_phase_jump", False),
+                            visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+                            args=args,
+                        )
+                        theta = np.asarray(theta_values, dtype=float)
+                        consistency = check_prediction_consistency(
+                            theta_before_update,
+                            theta,
+                            delta_P_applied,
+                            J,
+                            theta_labels,
+                            mzi_ids,
+                            out_dir=iter_dir,
+                            args=args,
+                        )
+                        if current_theta_summary.get("allow_hardware_update", False) and consistency["ok"]:
+                            break
+                    if rescan_counts:
+                        details_path = iter_dir / "current_theta_details.csv"
+                        detail_df = pd.read_csv(details_path)
+                        for idx, row in detail_df.iterrows():
+                            count_entry = rescan_counts.get(int(row["mzi_id"]), {})
+                            detail_df.loc[idx, "delta_rescan_count"] = int(count_entry.get("Delta", 0))
+                            detail_df.loc[idx, "sigma_rescan_count"] = int(count_entry.get("Sigma", 0))
+                        detail_df.to_csv(details_path, index=False)
+                current_theta_summary.update(
+                    {
+                        "prediction_consistency_ok": bool(consistency["ok"]),
+                        "prediction_inconsistent_mzi_ids": consistency["prediction_inconsistent_mzi_ids"],
+                        "prediction_inconsistent_parts": consistency["prediction_inconsistent_parts"],
+                    }
+                )
+                if not consistency["ok"]:
+                    current_theta_summary["allow_hardware_update"] = False
+                    current_theta_summary.setdefault("warnings", []).append("prediction consistency check failed")
+                with (iter_dir / "current_theta_summary.json").open("w", encoding="utf-8") as f:
+                    json.dump(current_theta_summary, f, indent=2)
+                shutil.copy2(theta_csv, run_dir / f"iter_{k:03d}_measured_theta.csv")
                 run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: updated theta from automatic scans")
             elif theta_update_mode == "predicted":
                 theta = theta + J @ (plan["P_next"] - P)
+                current_theta_summary = {"allow_hardware_update": True, "scan_quality_ok": True}
                 run_log("[ColumnPhaseOptimize] predicted theta update used after hardware write")
             elif theta_update_mode == "hybrid":
                 if current_theta_path is not None and current_theta_path.exists():
                     theta = load_current_theta_csv(current_theta_path, theta_labels)
+                    current_theta_summary = load_current_theta_summary_for_csv(current_theta_path)
                 else:
                     theta = theta + J @ (plan["P_next"] - P)
+                    current_theta_summary = {"allow_hardware_update": True, "scan_quality_ok": True}
             else:
                 raise ValueError("--theta_update_mode must be measured_manual, measured_auto, predicted, or hybrid")
         else:
             theta = theta + J @ (plan["P_next"] - P)
+            current_theta_summary = {"allow_hardware_update": True, "scan_quality_ok": True}
             run_log(f"[ColumnPhaseOptimize] iteration {k + 1}/{args.max_iter}: dry-run theta propagated")
         P = plan["P_next"]
         log_rows.append(
@@ -2304,6 +3055,12 @@ def iterate(args):
                 "num_voltage_clipped": int(np.sum(update_df["clipped"].to_numpy(dtype=bool))),
                 "allow_hardware_update": bool(np.isfinite(theta).all()),
                 "theta_source": getattr(args, "theta_update_mode", "measured_manual"),
+                "current_theta_measurement_dir": current_theta_summary.get("current_dir", ""),
+                "scan_quality_ok": current_theta_summary.get("scan_quality_ok", ""),
+                "prediction_consistency_ok": current_theta_summary.get("prediction_consistency_ok", ""),
+                "prediction_inconsistent_mzi_ids": json.dumps(current_theta_summary.get("prediction_inconsistent_mzi_ids", [])),
+                "prediction_inconsistent_parts": json.dumps(current_theta_summary.get("prediction_inconsistent_parts", [])),
+                "current_theta_warnings": json.dumps(current_theta_summary.get("warnings", [])),
                 "scan_profile": getattr(args, "scan_profile", "fast"),
                 **scan_info,
                 "actual_measure_time_s": float(actual_measure_time_s),
@@ -2321,6 +3078,8 @@ def iterate(args):
         "final_power_w": dict(zip(heater_labels, P)),
         "dry_run": bool(args.dry_run),
         "max_iter": args.max_iter,
+        "stopped_by_measurement_quality": bool(stopped_by_measurement_quality),
+        "failure_reason": failure_reason,
     }
     with (run_dir / "final_result.json").open("w", encoding="utf-8") as f:
         json.dump(final, f, indent=2)
@@ -2452,6 +3211,24 @@ def build_parser():
         p.add_argument("--voltage_pair_power", default="current_power_second_column.csv")
         p.add_argument("--strict_phase_jump", type=parse_bool, default=False)
         p.add_argument("--visibility_threshold", type=float, default=0.3)
+        p.add_argument("--enable_scan_outlier_check", type=parse_bool, default=True)
+        p.add_argument("--outlier_neighbor_ratio", type=float, default=0.3)
+        p.add_argument("--outlier_residual_sigma", type=float, default=3.0)
+        p.add_argument("--outlier_amplitude_ratio", type=float, default=0.3)
+        p.add_argument("--max_outliers_per_scan", type=int, default=1)
+        p.add_argument("--refit_without_outliers", type=parse_bool, default=True)
+        p.add_argument("--enable_prediction_consistency_check", type=parse_bool, default=True)
+        p.add_argument("--theta_prediction_error_threshold", type=float, default=0.5)
+        p.add_argument("--delta_prediction_error_threshold", type=float, default=0.5)
+        p.add_argument("--sigma_prediction_error_threshold", type=float, default=0.5)
+        p.add_argument("--stop_on_bad_theta", type=parse_bool, default=True)
+        p.add_argument("--enable_auto_rescan", type=parse_bool, default=True)
+        p.add_argument("--max_rescan_per_mzi", type=int, default=2)
+        p.add_argument("--rescan_only_failed_mzi", type=parse_bool, default=True)
+        p.add_argument("--opm_reads_per_point", type=int, default=3)
+        p.add_argument("--opm_read_interval_s", type=float, default=0.1)
+        p.add_argument("--opm_relative_std_threshold", type=float, default=0.05)
+        p.add_argument("--opm_max_retry_per_point", type=int, default=2)
         p.add_argument("--scan_profile", default="fast", choices=["full", "fast", "ultra_fast", "custom"])
         p.add_argument("--sigma_update_interval", type=int, default=2)
         p.add_argument("--estimated_seconds_per_point", type=float, default=6.5)
@@ -2475,6 +3252,25 @@ def build_parser():
     p_measure_theta.add_argument("--out_csv", default="current_theta_second_column.csv")
     p_measure_theta.add_argument("--strict_phase_jump", type=parse_bool, default=False)
     p_measure_theta.add_argument("--visibility_threshold", type=float, default=0.3)
+    p_measure_theta.add_argument("--enable_scan_outlier_check", type=parse_bool, default=True)
+    p_measure_theta.add_argument("--outlier_neighbor_ratio", type=float, default=0.3)
+    p_measure_theta.add_argument("--outlier_residual_sigma", type=float, default=3.0)
+    p_measure_theta.add_argument("--outlier_amplitude_ratio", type=float, default=0.3)
+    p_measure_theta.add_argument("--max_outliers_per_scan", type=int, default=1)
+    p_measure_theta.add_argument("--refit_without_outliers", type=parse_bool, default=True)
+
+    p_diag = sub.add_parser("diagnose_theta_measurement")
+    p_diag.add_argument("--reference_dir", default="Scandata/current_theta_reference")
+    p_diag.add_argument("--current_dir", default="Scandata/current_theta_measurement")
+    p_diag.add_argument("--out_dir", default="results/diagnose_current_theta")
+    p_diag.add_argument("--strict_phase_jump", type=parse_bool, default=False)
+    p_diag.add_argument("--visibility_threshold", type=float, default=0.3)
+    p_diag.add_argument("--enable_scan_outlier_check", type=parse_bool, default=True)
+    p_diag.add_argument("--outlier_neighbor_ratio", type=float, default=0.3)
+    p_diag.add_argument("--outlier_residual_sigma", type=float, default=3.0)
+    p_diag.add_argument("--outlier_amplitude_ratio", type=float, default=0.3)
+    p_diag.add_argument("--max_outliers_per_scan", type=int, default=1)
+    p_diag.add_argument("--refit_without_outliers", type=parse_bool, default=True)
 
     p_plan = sub.add_parser("plan")
     add_common(p_plan)
@@ -2550,7 +3346,10 @@ def main():
             args.out_csv,
             strict_phase_jump=args.strict_phase_jump,
             visibility_threshold=args.visibility_threshold,
+            args=args,
         )
+    elif args.mode == "diagnose_theta_measurement":
+        diagnose_theta_measurement(args)
     elif args.mode == "plan":
         run_plan(args)
     elif args.mode == "simulate":
@@ -2584,7 +3383,9 @@ def direct_main(config=DIRECT_RUN_CONFIG):
     elif args.mode == "plan":
         run_plan(args)
     elif args.mode == "measure_theta":
-        measure_current_theta_from_files(args.reference_dir, args.current_dir, args.current_theta)
+        measure_current_theta_from_files(args.reference_dir, args.current_dir, args.current_theta, args=args)
+    elif args.mode == "diagnose_theta_measurement":
+        diagnose_theta_measurement(args)
     elif args.mode == "init_reference":
         mzi_ids = parse_csv_list(args.mzi_ids, int)
         probe_map = parse_probe_map("5:u,6:u,7:u,8:u", mzi_ids)
