@@ -1,0 +1,52 @@
+{
+  "mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "heater_order": [
+    "5u",
+    "5d",
+    "6u",
+    "6d",
+    "7u",
+    "7d",
+    "8u",
+    "8d"
+  ],
+  "probe_map": {
+    "5": "u",
+    "6": "u",
+    "7": "u",
+    "8": "u"
+  },
+  "sigma_bmzi_map": {
+    "5": 0,
+    "6": 5,
+    "7": 6,
+    "8": 7
+  },
+  "sigma_reference_mode": "chained_bmzi",
+  "delta_probe_points": [
+    -0.001,
+    -0.0005,
+    0.0,
+    0.0005,
+    0.001
+  ],
+  "sigma_phase_points": [
+    0.0,
+    1.570796327,
+    3.141592654,
+    4.71238898,
+    6.283185307
+  ],
+  "opm_reads_per_point": 3,
+  "power_limit_w": 0.055,
+  "voltage_limit_v": 6.0,
+  "initial_state": "voltage_pair",
+  "initial_power_file": "current_power_second_column.csv",
+  "dry_run": false,
+  "timestamp": "2026-06-01T17:15:02"
+}

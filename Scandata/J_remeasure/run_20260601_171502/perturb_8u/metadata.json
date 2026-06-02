@@ -1,0 +1,23 @@
+{
+  "perturbed_heater": "8u",
+  "delta_power_w": 0.001,
+  "baseline_power_w": 0.0311204264845646,
+  "perturbed_power_w": 0.0321204264845646,
+  "heater_order": [
+    "5u",
+    "5d",
+    "6u",
+    "6d",
+    "7u",
+    "7d",
+    "8u",
+    "8d"
+  ],
+  "mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "timestamp": "2026-06-01T18:17:12"
+}
