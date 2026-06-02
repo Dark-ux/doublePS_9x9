@@ -1,0 +1,16 @@
+{
+  "final_power_w": {
+    "5u": 0.0312460942360806,
+    "5d": 0.0378864429618386,
+    "6u": 0.0341630895985996,
+    "6d": 0.0344552351058808,
+    "7u": 0.0319011354891148,
+    "7d": 0.0369051185186029,
+    "8u": 0.0311204264845646,
+    "8d": 0.0376250829905009
+  },
+  "dry_run": false,
+  "max_iter": 1,
+  "stopped_by_measurement_quality": true,
+  "failure_reason": "current_theta_summary allow_hardware_update=false"
+}

@@ -251,8 +251,10 @@ def plot_fit_comparison(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    p_min = min(np.min(baseline_fit["power_w"]), np.min(perturbed_fit["power_w"]))
-    p_max = max(np.max(baseline_fit["power_w"]), np.max(perturbed_fit["power_w"]))
+    baseline_x_all = np.concatenate([baseline_fit["power_w"], np.asarray(baseline_fit.get("excluded_x", []), dtype=float)])
+    perturbed_x_all = np.concatenate([perturbed_fit["power_w"], np.asarray(perturbed_fit.get("excluded_x", []), dtype=float)])
+    p_min = min(np.min(baseline_x_all), np.min(perturbed_x_all))
+    p_max = max(np.max(baseline_x_all), np.max(perturbed_x_all))
     p_grid = np.linspace(p_min, p_max, 400)
 
     plt.figure(figsize=(7, 5))
@@ -270,6 +272,14 @@ def plot_fit_comparison(
         linewidth=1.5,
         label="baseline fit",
     )
+    if len(baseline_fit.get("excluded_x", [])):
+        plt.plot(
+            np.asarray(baseline_fit["excluded_x"]) * 1000.0,
+            baseline_fit["excluded_y"],
+            "x",
+            markersize=8,
+            label="baseline excluded",
+        )
     plt.plot(
         perturbed_fit["power_w"] * 1000.0,
         perturbed_fit["optical_power_uW"],
@@ -284,6 +294,14 @@ def plot_fit_comparison(
         linewidth=1.5,
         label="perturbed fit",
     )
+    if len(perturbed_fit.get("excluded_x", [])):
+        plt.plot(
+            np.asarray(perturbed_fit["excluded_x"]) * 1000.0,
+            perturbed_fit["excluded_y"],
+            "x",
+            markersize=8,
+            label="perturbed excluded",
+        )
     plt.xlabel("Probe heater power (mW)")
     plt.ylabel("Bar optical power (uW)")
     plt.title(f"obs{observed_mzi} probe {probe_arm}, perturb {perturbed_heater}")
@@ -448,28 +466,78 @@ def load_generic_scan(path, x_candidates, y_candidates=("optical_power_uW", "pow
     return {"path": path, "df": df, "x": x[valid][order], "y": y[valid][order], "x_col": x_col, "y_col": y_col}
 
 
-def fit_sine_free_or_fixed(x, y, fix_w=None, init_params=None):
+def fit_sine_free_or_fixed(x, y, fix_w=None, init_params=None, remove_one_outlier=False):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+
+    def fit_core(x_fit, y_fit):
+        y_span = float(np.nanmax(y_fit) - np.nanmin(y_fit))
+        A0 = max(0.5 * y_span, 1e-9)
+        b0 = float(np.nanmean(y_fit))
+        w0 = 1.0 if float(np.ptp(x_fit)) == 0.0 else float(2.0 * np.pi / max(float(np.ptp(x_fit)), 1e-9))
+        phi0 = 0.0
+        if init_params:
+            A0 = max(abs(float(init_params.get("A", A0))), 1e-9)
+            w0 = max(abs(float(init_params.get("w", w0))), 1e-9)
+            phi0 = float(init_params.get("phi", init_params.get("beta", phi0)))
+            b0 = float(init_params.get("b", b0))
+        if fix_w is None:
+            popt, _ = curve_fit(sin_model, x_fit, y_fit, p0=[A0, w0, phi0, b0], bounds=([0.0, 0.0, -np.inf, -np.inf], [np.inf, np.inf, np.inf, np.inf]), maxfev=50000)
+            A, w, phi, b = popt
+        else:
+            w = float(fix_w)
+            popt, _ = curve_fit(lambda xx, A, phi, b: sin_model(xx, A, w, phi, b), x_fit, y_fit, p0=[A0, phi0, b0], bounds=([0.0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]), maxfev=50000)
+            A, phi, b = popt
+        fitted = sin_model(x_fit, A, w, phi, b)
+        return {
+            "A": float(A),
+            "w": float(w),
+            "phi": wrap_to_pi(phi),
+            "b": float(b),
+            "rmse_uW": rmse(y_fit, fitted),
+            "x": x_fit,
+            "y": y_fit,
+            "fitted": fitted,
+            "excluded_index": "",
+            "excluded_x": np.asarray([], dtype=float),
+            "excluded_y": np.asarray([], dtype=float),
+            "outlier_removed": False,
+        }
+
+    full_fit = fit_core(x, y)
+    if not remove_one_outlier or len(x) < 7:
+        return full_fit
+
+    best_fit = None
+    best_drop_idx = None
+    for drop_idx in range(len(x)):
+        mask = np.ones(len(x), dtype=bool)
+        mask[drop_idx] = False
+        try:
+            candidate = fit_core(x[mask], y[mask])
+        except Exception:
+            continue
+        if best_fit is None or candidate["rmse_uW"] < best_fit["rmse_uW"]:
+            best_fit = candidate
+            best_drop_idx = drop_idx
+
+    if best_fit is None:
+        return full_fit
     y_span = float(np.nanmax(y) - np.nanmin(y))
-    A0 = max(0.5 * y_span, 1e-9)
-    b0 = float(np.nanmean(y))
-    w0 = 1.0 if float(np.ptp(x)) == 0.0 else float(2.0 * np.pi / max(float(np.ptp(x)), 1e-9))
-    phi0 = 0.0
-    if init_params:
-        A0 = max(abs(float(init_params.get("A", A0))), 1e-9)
-        w0 = max(abs(float(init_params.get("w", w0))), 1e-9)
-        phi0 = float(init_params.get("phi", init_params.get("beta", phi0)))
-        b0 = float(init_params.get("b", b0))
-    if fix_w is None:
-        popt, _ = curve_fit(sin_model, x, y, p0=[A0, w0, phi0, b0], bounds=([0.0, 0.0, -np.inf, -np.inf], [np.inf, np.inf, np.inf, np.inf]), maxfev=50000)
-        A, w, phi, b = popt
-    else:
-        w = float(fix_w)
-        popt, _ = curve_fit(lambda xx, A, phi, b: sin_model(xx, A, w, phi, b), x, y, p0=[A0, phi0, b0], bounds=([0.0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]), maxfev=50000)
-        A, phi, b = popt
-    fitted = sin_model(x, A, w, phi, b)
-    return {"A": float(A), "w": float(w), "phi": wrap_to_pi(phi), "b": float(b), "rmse_uW": rmse(y, fitted), "x": x, "y": y, "fitted": fitted}
+    min_improvement_uW = max(0.05, 0.02 * y_span)
+    improves_enough = (
+        best_fit["rmse_uW"] < 0.5 * full_fit["rmse_uW"]
+        and (full_fit["rmse_uW"] - best_fit["rmse_uW"]) > min_improvement_uW
+    )
+    if not improves_enough:
+        return full_fit
+
+    best_fit["excluded_index"] = int(best_drop_idx)
+    best_fit["excluded_x"] = np.asarray([x[best_drop_idx]], dtype=float)
+    best_fit["excluded_y"] = np.asarray([y[best_drop_idx]], dtype=float)
+    best_fit["outlier_removed"] = True
+    best_fit["full_rmse_before_outlier_removal_uW"] = float(full_fit["rmse_uW"])
+    return best_fit
 
 
 def _read_delta_power(metadata_path):
@@ -676,7 +744,7 @@ def compute_j_delta(mzi_table_path, jacobian_dir, out_dir, probe_map, fix_w=True
     return j_w_df
 
 
-def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_map, sigma_reference_mode, fix_w=True):
+def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_map, sigma_reference_mode, fix_w=True, mzi_table_path="Scandata/MZI_table.json"):
     jacobian_dir = Path(jacobian_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -694,6 +762,7 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
     warnings = []
     baseline_delta_fits = {}
     baseline_sigma_fits = {}
+    mzi_table = load_mzi_table(resolve_default_mzi_table(mzi_table_path))
 
     for mzi_id in mzi_ids:
         probe_arm = probe_map.get(int(mzi_id), "u")
@@ -701,8 +770,9 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
         sigma_base = jacobian_dir / "baseline" / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt"
         delta_scan = load_generic_scan(delta_base, ("probe_axis_power_w", "measured_power_w", "target_power_w"))
         sigma_scan = load_generic_scan(sigma_base, ("dp",))
-        baseline_delta_fits[int(mzi_id)] = fit_sine_free_or_fixed(delta_scan["x"], delta_scan["y"], fix_w=None)
-        baseline_sigma_fits[int(mzi_id)] = fit_sine_free_or_fixed(sigma_scan["x"], sigma_scan["y"], fix_w=None)
+        delta_init = get_fit_params(mzi_table, int(mzi_id), probe_arm)
+        baseline_delta_fits[int(mzi_id)] = fit_sine_free_or_fixed(delta_scan["x"], delta_scan["y"], fix_w=delta_init["w"] if fix_w else None, init_params=delta_init, remove_one_outlier=True)
+        baseline_sigma_fits[int(mzi_id)] = fit_sine_free_or_fixed(sigma_scan["x"], sigma_scan["y"], fix_w=None, remove_one_outlier=True)
 
     for heater in heaters:
         perturb_dir = jacobian_dir / f"perturb_{heater}"
@@ -720,7 +790,7 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
             try:
                 pert_delta_scan = load_generic_scan(perturb_dir / "delta" / f"obs{int(mzi_id)}_probe.txt", ("probe_axis_power_w", "measured_power_w", "target_power_w"))
                 base_fit = baseline_delta_fits[int(mzi_id)]
-                pert_fit = fit_sine_free_or_fixed(pert_delta_scan["x"], pert_delta_scan["y"], fix_w=base_fit["w"] if fix_w else None, init_params=base_fit)
+                pert_fit = fit_sine_free_or_fixed(pert_delta_scan["x"], pert_delta_scan["y"], fix_w=base_fit["w"] if fix_w else None, init_params=base_fit, remove_one_outlier=True)
                 delta_eta = wrap_to_pi(pert_fit["phi"] - base_fit["phi"])
                 delta_delta = delta_eta if probe_arm == "u" else -delta_eta
                 j_value = delta_delta / delta_power_w
@@ -738,14 +808,20 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
                         "J_delta_rad_per_w": j_value,
                         "baseline_rmse_uW": base_fit["rmse_uW"],
                         "perturbed_rmse_uW": pert_fit["rmse_uW"],
+                        "baseline_outlier_removed": bool(base_fit.get("outlier_removed", False)),
+                        "baseline_excluded_index": base_fit.get("excluded_index", ""),
+                        "baseline_full_rmse_before_outlier_removal_uW": base_fit.get("full_rmse_before_outlier_removal_uW", ""),
+                        "perturbed_outlier_removed": bool(pert_fit.get("outlier_removed", False)),
+                        "perturbed_excluded_index": pert_fit.get("excluded_index", ""),
+                        "perturbed_full_rmse_before_outlier_removal_uW": pert_fit.get("full_rmse_before_outlier_removal_uW", ""),
                         "warning": "abs(delta_eta)>pi/2" if abs(delta_eta) > np.pi / 2 else "",
                     }
                 )
                 plot_fit_comparison(
                     jacobian_dir / "baseline" / "delta" / f"obs{int(mzi_id)}_probe.txt",
                     perturb_dir / "delta" / f"obs{int(mzi_id)}_probe.txt",
-                    {"power_w": base_fit["x"], "optical_power_uW": base_fit["y"], "A": base_fit["A"], "w": base_fit["w"], "phi": base_fit["phi"], "b": base_fit["b"]},
-                    {"power_w": pert_fit["x"], "optical_power_uW": pert_fit["y"], "A": pert_fit["A"], "w": pert_fit["w"], "phi": pert_fit["phi"], "b": pert_fit["b"]},
+                    {"power_w": base_fit["x"], "optical_power_uW": base_fit["y"], "A": base_fit["A"], "w": base_fit["w"], "phi": base_fit["phi"], "b": base_fit["b"], "excluded_x": base_fit.get("excluded_x", []), "excluded_y": base_fit.get("excluded_y", [])},
+                    {"power_w": pert_fit["x"], "optical_power_uW": pert_fit["y"], "A": pert_fit["A"], "w": pert_fit["w"], "phi": pert_fit["phi"], "b": pert_fit["b"], "excluded_x": pert_fit.get("excluded_x", []), "excluded_y": pert_fit.get("excluded_y", [])},
                     int(mzi_id),
                     probe_arm,
                     heater,
@@ -758,7 +834,7 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
             try:
                 pert_sigma_scan = load_generic_scan(perturb_dir / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt", ("dp",))
                 base_fit = baseline_sigma_fits[int(mzi_id)]
-                pert_fit = fit_sine_free_or_fixed(pert_sigma_scan["x"], pert_sigma_scan["y"], fix_w=base_fit["w"] if fix_w else None, init_params=base_fit)
+                pert_fit = fit_sine_free_or_fixed(pert_sigma_scan["x"], pert_sigma_scan["y"], fix_w=base_fit["w"] if fix_w else None, init_params=base_fit, remove_one_outlier=True)
                 delta_beta = wrap_to_pi(pert_fit["phi"] - base_fit["phi"])
                 sigma_coeff = 2.0
                 relative_link = sigma_coeff * delta_beta
@@ -778,14 +854,20 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
                         "J_sigma_link_rad_per_w": j_link_value,
                         "baseline_rmse_uW": base_fit["rmse_uW"],
                         "perturbed_rmse_uW": pert_fit["rmse_uW"],
+                        "baseline_outlier_removed": bool(base_fit.get("outlier_removed", False)),
+                        "baseline_excluded_index": base_fit.get("excluded_index", ""),
+                        "baseline_full_rmse_before_outlier_removal_uW": base_fit.get("full_rmse_before_outlier_removal_uW", ""),
+                        "perturbed_outlier_removed": bool(pert_fit.get("outlier_removed", False)),
+                        "perturbed_excluded_index": pert_fit.get("excluded_index", ""),
+                        "perturbed_full_rmse_before_outlier_removal_uW": pert_fit.get("full_rmse_before_outlier_removal_uW", ""),
                         "warning": "sigma_coeff default +2",
                     }
                 )
                 plot_fit_comparison(
                     jacobian_dir / "baseline" / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt",
                     perturb_dir / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt",
-                    {"power_w": base_fit["x"], "optical_power_uW": base_fit["y"], "A": base_fit["A"], "w": base_fit["w"], "phi": base_fit["phi"], "b": base_fit["b"]},
-                    {"power_w": pert_fit["x"], "optical_power_uW": pert_fit["y"], "A": pert_fit["A"], "w": pert_fit["w"], "phi": pert_fit["phi"], "b": pert_fit["b"]},
+                    {"power_w": base_fit["x"], "optical_power_uW": base_fit["y"], "A": base_fit["A"], "w": base_fit["w"], "phi": base_fit["phi"], "b": base_fit["b"], "excluded_x": base_fit.get("excluded_x", []), "excluded_y": base_fit.get("excluded_y", [])},
+                    {"power_w": pert_fit["x"], "optical_power_uW": pert_fit["y"], "A": pert_fit["A"], "w": pert_fit["w"], "phi": pert_fit["phi"], "b": pert_fit["b"], "excluded_x": pert_fit.get("excluded_x", []), "excluded_y": pert_fit.get("excluded_y", [])},
                     int(mzi_id),
                     "sigma",
                     heater,
@@ -854,6 +936,7 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
         "probe_map": {str(k): v for k, v in probe_map.items()},
         "sigma_reference_mode": sigma_reference_mode,
         "sigma_bmzi_map": sigma_bmzi_map,
+        "mzi_table_path": str(resolve_default_mzi_table(mzi_table_path)),
         "sigma_chain_order": chain_order,
         "sigma_chain_valid": bool(chain_valid),
         "J_delta_shape": list(j_delta.shape),
@@ -863,6 +946,7 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
         "J_sigma_definition": "global J_sigma relative to top straight waveguide, reconstructed from relative sigma links measured against bmzi",
         "relative_sigma_link_definition": "sigma inter scan measures delta_Sigma_i - delta_Sigma_bmzi",
         "J_theta_definition": "J_u=(J_sigma_global+J_delta)/2, J_d=(J_sigma_global-J_delta)/2",
+        "J_delta_fit_definition": "delta probe fits use fixed heater phase frequency from MZI_table when fix_w=true",
         "warnings": warnings,
     }
     with (out_dir / "J_compute_summary.json").open("w", encoding="utf-8") as f:
@@ -914,6 +998,7 @@ def main():
     p_all.add_argument("--sigma_bmzi_map", default="5:0,6:5,7:6,8:7")
     p_all.add_argument("--sigma_reference_mode", default="chained_bmzi", choices=["chained_bmzi", "direct_reference"])
     p_all.add_argument("--fix_w", type=str_to_bool, default=True)
+    p_all.add_argument("--mzi_table", default="Scandata/MZI_table.json")
 
     parser.add_argument("--mzi_table", default="MZI_table.json", help=argparse.SUPPRESS)
     parser.add_argument("--jacobian_dir", default="jacobian_measurements", help=argparse.SUPPRESS)
@@ -934,6 +1019,7 @@ def main():
             sigma_bmzi_map=parse_sigma_bmzi_map(args.sigma_bmzi_map, mzi_ids),
             sigma_reference_mode=args.sigma_reference_mode,
             fix_w=args.fix_w,
+            mzi_table_path=args.mzi_table,
         )
     else:
         probe_map = parse_probe_map(args.probe_map)

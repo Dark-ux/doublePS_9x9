@@ -111,6 +111,7 @@ class DirectRunConfig:
     model_weight: float = 0.2
     resume: bool = False
     resume_run_dir: str | None = None
+    fix_delta_probe_w: bool = True
 
 
 DIRECT_RUN_CONFIG = DirectRunConfig()
@@ -715,6 +716,14 @@ def get_mzi_arm_info(mzi_table, mzi_id, arm):
     }
 
 
+def delta_probe_w_from_mzi_table(mzi_table, mzi_id, arm):
+    info = get_mzi_arm_info(mzi_table, mzi_id, arm)
+    ppi = float(info["ppi"])
+    if not np.isfinite(ppi) or ppi <= 0:
+        raise ValueError(f"MZI {mzi_id}{arm} has invalid Ppi={ppi}.")
+    return float(np.pi / ppi)
+
+
 def get_mzi_state_voltage(entry, state):
     state = str(state).upper()
     if state == "B":
@@ -1087,7 +1096,15 @@ def build_target_theta(mzi_ids=DEFAULT_MZI_IDS):
     return np.array(target, dtype=float)
 
 
-def init_theta_reference(reference_dir, probe_map, sigma_sign_path=None, mzi_ids=DEFAULT_MZI_IDS, dry_run=False):
+def init_theta_reference(
+    reference_dir,
+    probe_map,
+    sigma_sign_path=None,
+    mzi_ids=DEFAULT_MZI_IDS,
+    dry_run=False,
+    mzi_table_path="Scandata/MZI_table.json",
+    fix_delta_probe_w=True,
+):
     print(
         "[ColumnPhaseOptimize] init_reference expects delta_baseline and sigma_baseline scans "
         "collected at the voltage-pair baseline. This voltage-pair baseline defines theta=0."
@@ -1115,6 +1132,8 @@ def init_theta_reference(reference_dir, probe_map, sigma_sign_path=None, mzi_ids
             "Missing reference scans. Create/copy baseline scans first:\n" + "\n".join(missing)
         )
 
+    fix_delta_probe_w = parse_bool(fix_delta_probe_w)
+    mzi_table = load_mzi_table(mzi_table_path) if fix_delta_probe_w else None
     sigma_coeff, coeff_warnings = load_sigma_coeff(reference_dir, sigma_sign_path, mzi_ids)
     delta_eta_ref = {}
     delta_w_ref = {}
@@ -1126,7 +1145,9 @@ def init_theta_reference(reference_dir, probe_map, sigma_sign_path=None, mzi_ids
 
     for mzi_id in mzi_ids:
         key = str(int(mzi_id))
-        delta_fit_i = fit_delta_probe_phase(delta_dir / f"obs{key}_probe.txt")
+        probe_arm = probe_map.get(key, "u")
+        delta_w = delta_probe_w_from_mzi_table(mzi_table, mzi_id, probe_arm) if fix_delta_probe_w else None
+        delta_fit_i = fit_delta_probe_phase(delta_dir / f"obs{key}_probe.txt", init_w=delta_w)
         sigma_fit_i = fit_sigma_inter_phase(sigma_dir / f"obs{key}_inter_scan.txt")
         delta_eta_ref[key] = float(delta_fit_i["phi"])
         delta_w_ref[key] = float(delta_fit_i["w"])
@@ -1161,6 +1182,9 @@ def init_theta_reference(reference_dir, probe_map, sigma_sign_path=None, mzi_ids
         "sigma_coeff": sigma_coeff,
         "theta_order": theta_labels_for_mzis(mzi_ids),
         "warnings": warnings,
+        "delta_probe_w_fixed_from_mzi_table": bool(fix_delta_probe_w),
+        "delta_probe_w_definition": "pi/Ppi of the probed arm from MZI_table" if fix_delta_probe_w else "free sine fit",
+        "mzi_table_path": str(mzi_table_path) if fix_delta_probe_w else "",
     }
     path = save_theta_reference(reference_dir, data)
     print(f"Saved theta reference to {path}")
@@ -1214,6 +1238,8 @@ def ensure_theta_reference(reference_dir, args, mzi_ids=DEFAULT_MZI_IDS):
         sigma_sign_path=getattr(args, "sigma_sign_path", "Scandata/J_sigma/sign_check/sigma_sign.json"),
         mzi_ids=mzi_ids,
         dry_run=False,
+        mzi_table_path=getattr(args, "mzi_table", "Scandata/MZI_table.json"),
+        fix_delta_probe_w=getattr(args, "fix_delta_probe_w", True),
     )
     return reference_json
 
@@ -3477,9 +3503,11 @@ def build_parser():
 
     p_init = sub.add_parser("init_reference")
     p_init.add_argument("--mzi_ids", default="5,6,7,8")
+    p_init.add_argument("--mzi_table", default="Scandata/MZI_table.json")
     p_init.add_argument("--reference_dir", default="Scandata/current_theta_reference")
     p_init.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
     p_init.add_argument("--sigma_sign", default="Scandata/J_sigma/sign_check/sigma_sign.json")
+    p_init.add_argument("--fix_delta_probe_w", type=parse_bool, default=True)
     p_init.add_argument("--dry_run", type=parse_bool, default=False)
 
     p_measure_theta = sub.add_parser("measure_theta")
@@ -3584,6 +3612,8 @@ def main():
             sigma_sign_path=args.sigma_sign,
             mzi_ids=mzi_ids,
             dry_run=args.dry_run,
+            mzi_table_path=args.mzi_table,
+            fix_delta_probe_w=args.fix_delta_probe_w,
         )
     elif args.mode == "measure_theta":
         measure_current_theta_from_files(
@@ -3641,6 +3671,8 @@ def direct_main(config=DIRECT_RUN_CONFIG):
             sigma_sign_path="Scandata/J_sigma/sign_check/sigma_sign.json",
             mzi_ids=mzi_ids,
             dry_run=False,
+            mzi_table_path=args.mzi_table,
+            fix_delta_probe_w=getattr(args, "fix_delta_probe_w", True),
         )
     else:
         raise ValueError(f"Unsupported DIRECT_RUN_CONFIG.mode: {args.mode}")

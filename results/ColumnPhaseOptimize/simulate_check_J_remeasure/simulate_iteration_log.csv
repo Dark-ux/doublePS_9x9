@@ -1,0 +1,4 @@
+iter,max_abs_theta_error_rad,norm_theta_error,model_output_rmse,model_output_mae,model_output_max_abs,alpha_used,lambda_reg,step_scale,num_clipped,theta_converged,output_converged,convergence_mode,converged,warning
+0,3.141592653589793,3.6275987284684352,0.1653594569415369,0.06249999999999997,1.0,0.1,0.001,0.4433228739590152,0,False,False,theta_only,False,large delta_P; consider increasing lambda_reg or decreasing alpha
+1,3.0023186763842453,3.466778995656391,0.16474941560292816,0.06232334277108602,0.9951585234088856,0.1,0.001,0.46388809101380307,0,False,False,theta_only,False,large delta_P; consider increasing lambda_reg or decreasing alpha
+2,2.8630446996381957,3.305959263205638,0.16293022741827493,0.06179505374135013,0.9807278532760856,0.1,0.001,1.0,0,False,False,theta_only,False,

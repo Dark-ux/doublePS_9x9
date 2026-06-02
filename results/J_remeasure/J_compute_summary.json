@@ -28,6 +28,7 @@
     "7": 6,
     "8": 7
   },
+  "mzi_table_path": "Scandata\\MZI_table.json",
   "sigma_chain_order": [
     5,
     6,
@@ -54,5 +55,6 @@
   "J_sigma_definition": "global J_sigma relative to top straight waveguide, reconstructed from relative sigma links measured against bmzi",
   "relative_sigma_link_definition": "sigma inter scan measures delta_Sigma_i - delta_Sigma_bmzi",
   "J_theta_definition": "J_u=(J_sigma_global+J_delta)/2, J_d=(J_sigma_global-J_delta)/2",
+  "J_delta_fit_definition": "delta probe fits use fixed heater phase frequency from MZI_table when fix_w=true",
   "warnings": []
 }
