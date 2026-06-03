@@ -1,0 +1,68 @@
+{
+  "mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "heater_order": [
+    "5u",
+    "5d",
+    "6u",
+    "6d",
+    "7u",
+    "7d",
+    "8u",
+    "8d"
+  ],
+  "probe_map": {
+    "5": "u",
+    "6": "u",
+    "7": "u",
+    "8": "u"
+  },
+  "sigma_bmzi_map": {
+    "5": 0,
+    "6": 5,
+    "7": 6,
+    "8": 7
+  },
+  "sigma_reference_mode": "chained_bmzi",
+  "route_lower_policy": "zero",
+  "delta_probe_points": [
+    -0.001,
+    -0.00075,
+    -0.0005,
+    -0.00025,
+    0.0,
+    0.00025,
+    0.0005,
+    0.00075,
+    0.001
+  ],
+  "delta_probe_half_width_w": 0.001,
+  "delta_probe_step_w": 0.00025,
+  "sigma_points": 9,
+  "sigma_phase_points": [
+    0.0,
+    0.785398,
+    1.570796,
+    2.356194,
+    3.141593,
+    3.926991,
+    4.712389,
+    5.497787,
+    6.283185
+  ],
+  "opm_reads_per_point": 5,
+  "max_scan_retry": 3,
+  "power_limit_w": 0.055,
+  "voltage_limit_v": 6.0,
+  "point_settle_time_s": 2.0,
+  "baseline_restore_wait_s": 2.0,
+  "perturb_settle_time_s": 2.0,
+  "initial_state": "voltage_pair",
+  "initial_power_file": "current_power_second_column.csv",
+  "dry_run": false,
+  "timestamp": "2026-06-03T10:41:30"
+}

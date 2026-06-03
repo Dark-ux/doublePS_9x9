@@ -1,0 +1,60 @@
+{
+  "mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "heater_order": [
+    "5u",
+    "5d",
+    "6u",
+    "6d",
+    "7u",
+    "7d",
+    "8u",
+    "8d"
+  ],
+  "probe_map": {
+    "5": "u",
+    "6": "u",
+    "7": "u",
+    "8": "u"
+  },
+  "sigma_reference_mode": "chained_bmzi",
+  "sigma_bmzi_map": {
+    "5": 0,
+    "6": 5,
+    "7": 6,
+    "8": 7
+  },
+  "mzi_table_path": "Scandata\\MZI_table.json",
+  "sigma_chain_order": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "sigma_chain_valid": true,
+  "J_delta_shape": [
+    4,
+    8
+  ],
+  "J_sigma_link_shape": [
+    4,
+    8
+  ],
+  "J_sigma_global_shape": [
+    4,
+    8
+  ],
+  "J_theta_shape": [
+    8,
+    8
+  ],
+  "J_sigma_definition": "global J_sigma relative to top straight waveguide, reconstructed from relative sigma links measured against bmzi",
+  "relative_sigma_link_definition": "sigma inter scan measures delta_Sigma_i - delta_Sigma_bmzi",
+  "J_theta_definition": "J_u=(J_sigma_global+J_delta)/2, J_d=(J_sigma_global-J_delta)/2",
+  "J_delta_fit_definition": "delta probe fits use fixed heater phase frequency from MZI_table when fix_w=true",
+  "warnings": []
+}

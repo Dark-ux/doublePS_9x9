@@ -29,6 +29,42 @@ def parse_csv_list(text, item_type=str):
     return [item_type(item.strip()) for item in str(text).split(",") if item.strip()]
 
 
+def validate_heater_order(heaters, mzi_ids):
+    normalized = []
+    errors = []
+    allowed_mzis = {int(mzi_id) for mzi_id in mzi_ids}
+    for heater in heaters:
+        text = str(heater).strip().lower()
+        if len(text) < 2 or text[-1] not in {"u", "d"}:
+            errors.append(text)
+            continue
+        try:
+            mzi_id = int(text[:-1])
+        except ValueError:
+            errors.append(text)
+            continue
+        if mzi_id not in allowed_mzis:
+            errors.append(text)
+            continue
+        normalized.append(text)
+    if errors:
+        raise ValueError(
+            f"Invalid --heaters entries {errors}. "
+            "Use heater labels like 5u,5d,6u,6d,7u,7d,8u,8d."
+        )
+    duplicates = sorted({heater for heater in normalized if normalized.count(heater) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate --heaters entries: {duplicates}")
+    expected = [f"{int(mzi_id)}{arm}" for mzi_id in mzi_ids for arm in ("u", "d")]
+    missing = [heater for heater in expected if heater not in normalized]
+    if missing:
+        raise ValueError(
+            f"--heaters is missing {missing}. "
+            f"Expected all second-column heaters: {','.join(expected)}"
+        )
+    return normalized
+
+
 def generate_delta_offsets(args):
     text = str(args.delta_probe_points).strip()
     if "," in text:
@@ -195,7 +231,14 @@ def read_power_file(path, heater_order):
     if not {"heater", "power_w"}.issubset(df.columns):
         raise ValueError(f"{path} must contain heater,power_w columns.")
     values = {str(row.heater).strip().lower(): float(row.power_w) for row in df.itertuples()}
-    return {heater: values[heater.lower()] for heater in heater_order}
+    missing = [str(heater).strip() for heater in heater_order if str(heater).strip().lower() not in values]
+    if missing:
+        raise ValueError(
+            f"{path} is missing requested heaters {missing}. "
+            f"Available heaters: {sorted(values)}. "
+            "Use --heaters like 5u,5d,6u,6d,7u,7d,8u,8d, not just MZI ids."
+        )
+    return {heater: values[str(heater).strip().lower()] for heater in heater_order}
 
 
 def read_opm_repeated(opm, output_channel, args):
@@ -265,6 +308,8 @@ QUALITY_COLUMNS = [
     "near_zero_point_count",
     "neighbor_jump_count",
     "edge_jump_count",
+    "route_lower_policy",
+    "route_lower_zero_applied",
     "warning",
     "failure_reason",
 ]
@@ -292,6 +337,31 @@ def append_csv_row(path, row, columns):
     )
 
 
+def first_nonempty_df_value(df, column, default=""):
+    if column not in df.columns:
+        return default
+    for value in df[column].tolist():
+        if pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text:
+            return value
+    return default
+
+
+def parse_bool_cell(value):
+    if isinstance(value, bool):
+        return value
+    if pd.isna(value):
+        return None
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off"}:
+        return False
+    return None
+
+
 def build_quality_row(stage, perturb_label, scan_kind, observed_mzi, scan_file, try_count, df, valid, warning, failure_reason, counts):
     y = pd.to_numeric(df["optical_power_uW"], errors="coerce").to_numpy(dtype=float)
     if y.size == 0 or np.isnan(y).all():
@@ -301,6 +371,15 @@ def build_quality_row(stage, perturb_label, scan_kind, observed_mzi, scan_file, 
         min_y = float(np.nanmin(y))
         max_y = float(np.nanmax(y))
         curve_range = float(max_y - min_y)
+    route_lower_policy = first_nonempty_df_value(df, "route_lower_policy", "")
+    route_lower_zero_applied = ""
+    if "route_lower_zero_applied" in df.columns:
+        parsed = [parse_bool_cell(value) for value in df["route_lower_zero_applied"].tolist()]
+        parsed = [value for value in parsed if value is not None]
+        if parsed:
+            route_lower_zero_applied = bool(all(parsed))
+    route_warning = str(first_nonempty_df_value(df, "route_warning", "")).strip()
+    merged_warning = "; ".join([text for text in (str(warning).strip(), route_warning) if text])
     return {
         "stage": stage,
         "perturb_label": perturb_label,
@@ -318,7 +397,9 @@ def build_quality_row(stage, perturb_label, scan_kind, observed_mzi, scan_file, 
         "near_zero_point_count": int(counts.get("near_zero_point_count", 0)),
         "neighbor_jump_count": int(counts.get("neighbor_jump_count", 0)),
         "edge_jump_count": int(counts.get("edge_jump_count", 0)),
-        "warning": warning,
+        "route_lower_policy": route_lower_policy,
+        "route_lower_zero_applied": route_lower_zero_applied,
+        "warning": merged_warning,
         "failure_reason": failure_reason,
     }
 
@@ -412,25 +493,115 @@ def get_mzi_state_voltage(entry, state):
     return float(values[0 if state == "B" else min(1, len(values) - 1)])
 
 
-def build_bmzi_state_no_upload(path, input_idx, state, bmzi, working_data, mzi_table, n_value):
+def normalize_route_lower_policy(policy):
+    policy = str(policy or "zero").strip().lower()
+    if policy not in {"zero", "keep_base"}:
+        raise ValueError("--route_lower_policy must be zero or keep_base.")
+    return policy
+
+
+def get_route_state_voltage(entry, state):
+    state = str(state).upper()
+    if state in {"B", "C"}:
+        return get_mzi_state_voltage(entry, state)
+    if state == "H":
+        half_values = entry.get("half_power", [])
+        if not half_values:
+            raise ValueError("MZI entry missing H half_power voltage.")
+        return float(half_values[0])
+    raise ValueError(f"Unsupported route MZI state {state!r}.")
+
+
+def set_route_mzi_state(mzi_id, entry, state, working_data, lower_policy="zero"):
+    lower_policy = normalize_route_lower_policy(lower_policy)
+    ports = [int(port) for port in entry.get("ports", [])]
+    if not ports:
+        raise ValueError(f"MZI {int(mzi_id)} missing ports.")
+
+    state = str(state).upper()
+    upper_voltage = float(get_route_state_voltage(entry, state))
+    write_port_voltage(int(ports[0]), upper_voltage, working_data)
+
+    lower_port = int(ports[1]) if len(ports) >= 2 else None
+    lower_voltage = None
+    lower_zero_applied = True
+    warnings = []
+    if lower_port is None:
+        warnings.append(f"MZI{int(mzi_id)} has no lower route port for state {state}")
+    elif lower_policy == "zero":
+        lower_voltage = 0.0
+        write_port_voltage(lower_port, lower_voltage, working_data)
+    else:
+        lower_voltage = float(get_port_voltage(working_data, lower_port))
+        lower_zero_applied = False
+        warnings.append(
+            f"route_lower_policy=keep_base kept lower arm for MZI{int(mzi_id)} at {lower_voltage:.6f} V"
+        )
+
+    return {
+        "mzi_id": int(mzi_id),
+        "state": state,
+        "upper_port": int(ports[0]),
+        "lower_port": lower_port,
+        "upper_voltage": upper_voltage,
+        "lower_voltage": lower_voltage,
+        "lower_zero_applied": bool(lower_zero_applied),
+        "warning": "; ".join(warnings),
+    }
+
+
+def route_records_to_fields(records, lower_policy):
+    records = list(records)
+    warnings = [str(record.get("warning", "")).strip() for record in records if str(record.get("warning", "")).strip()]
+    route_lower_zero_applied = bool(all(record.get("lower_zero_applied", True) for record in records))
+    return {
+        "route_mzi_ids": json.dumps([int(record["mzi_id"]) for record in records]),
+        "route_states": json.dumps([str(record["state"]) for record in records]),
+        "route_upper_ports": json.dumps([int(record["upper_port"]) for record in records]),
+        "route_lower_ports": json.dumps([record["lower_port"] for record in records]),
+        "route_upper_voltages": json.dumps([float(record["upper_voltage"]) for record in records]),
+        "route_lower_voltages": json.dumps(
+            [None if record["lower_voltage"] is None else float(record["lower_voltage"]) for record in records]
+        ),
+        "route_lower_policy": normalize_route_lower_policy(lower_policy),
+        "route_lower_zero_applied": route_lower_zero_applied,
+        "route_warning": "; ".join(warnings),
+    }
+
+
+def build_bmzi_state_no_upload(
+    path,
+    input_idx,
+    state,
+    bmzi,
+    working_data,
+    mzi_table,
+    n_value,
+    route_lower_policy="zero",
+    target_mzi=None,
+):
+    route_lower_policy = normalize_route_lower_policy(route_lower_policy)
+    route_records = []
     for idx, mzi_value in enumerate(path):
         mzi_id = int(mzi_value)
         entry = mzi_table[str(mzi_id)]
+        route_state = str(state[idx]).upper()
         ports = entry.get("ports", [])
         if not ports:
             raise ValueError(f"MZI {mzi_id} missing ports.")
-        if state[idx] == "B":
-            write_port_voltage(int(ports[0]), get_mzi_state_voltage(entry, "B"), working_data)
-        elif state[idx] == "C":
-            write_port_voltage(int(ports[0]), get_mzi_state_voltage(entry, "C"), working_data)
-        elif state[idx] == "H":
-            half_values = entry.get("half_power", [])
-            if not half_values:
-                raise ValueError(f"MZI {mzi_id} missing half_power voltage.")
-            write_port_voltage(int(ports[0]), float(half_values[0]), working_data)
+        if target_mzi is not None and mzi_id == int(target_mzi):
+            write_port_voltage(int(ports[0]), get_route_state_voltage(entry, route_state), working_data)
+            continue
+        route_records.append(set_route_mzi_state(mzi_id, entry, route_state, working_data, route_lower_policy))
     for channel in range(1, int(n_value)):
         switch_IN(channel, "OFF", working_data)
     switch_IN(int(input_idx) + 1, "ON", working_data)
+    route_fields = route_records_to_fields(route_records, route_lower_policy)
+    if int(bmzi) == 0:
+        route_fields["bmzi_route_note"] = "bmzi=0 top straight reference"
+    else:
+        route_fields["bmzi_route_note"] = f"bmzi={int(bmzi)} metadata only; no separate B/C/H route state applied"
+    return route_fields
 
 
 def apply_second_column_powers(working_data, mzi_table, mzi_ids, heater_order, powers):
@@ -507,7 +678,17 @@ def scan_sigma_inter_once(observed_mzi, out_path, base_working_data, hardware, m
     target = int(observed_mzi)
     scan_data = base_working_data.copy(deep=True)
     path, input_idx, output_idx, state, bmzi = find_Bmzi_path(target, int(args.N))
-    build_bmzi_state_no_upload(path, input_idx, state, bmzi, scan_data, mzi_table, int(args.N))
+    route_fields = build_bmzi_state_no_upload(
+        path,
+        input_idx,
+        state,
+        bmzi,
+        scan_data,
+        mzi_table,
+        int(args.N),
+        route_lower_policy=getattr(args, "route_lower_policy", "zero"),
+        target_mzi=target,
+    )
     entry = mzi_table[str(target)]
     ports = [int(v) for v in entry.get("ports", [])[:2]]
     heater_r = [float(v) for v in entry.get("heater_R", [])[:2]]
@@ -539,6 +720,10 @@ def scan_sigma_inter_once(observed_mzi, out_path, base_working_data, hardware, m
             args,
             reupload_callback=lambda sd=scan_data, lbl=label: upload_voltage_checked(hardware["mcv"], sd, args, f"{lbl} reupload"),
         )
+        route_warning = str(route_fields.get("route_warning", "")).strip()
+        combined_warning = "; ".join([text for text in (str(opm.get("warning", "")).strip(), route_warning) if text])
+        opm["warning"] = combined_warning
+        opm["point_warning"] = combined_warning
         read_timestamp = datetime.now().isoformat(timespec="seconds")
         rows.append(
             {
@@ -549,6 +734,7 @@ def scan_sigma_inter_once(observed_mzi, out_path, base_working_data, hardware, m
                 "output_channel": int(output_idx) + 1,
                 "path": json.dumps([int(v) for v in path]),
                 "state": json.dumps([str(v) for v in state]),
+                **route_fields,
                 "dp": float(dp),
                 "v_primary": float(v_upper),
                 "v_secondary": float(v_lower),
@@ -740,6 +926,7 @@ def write_dry_run_placeholders(run_dir, args):
 def measure(args):
     args._mzi_ids = parse_csv_list(args.mzi_ids, int)
     args._heaters = parse_csv_list(args.heaters, str)
+    args._heaters = validate_heater_order(args._heaters, args._mzi_ids)
     args._delta_offsets = generate_delta_offsets(args)
     args._sigma_phase_points = generate_sigma_phase_points(args)
     probe_map = parse_probe_map(args.probe_map, args._mzi_ids)
@@ -752,6 +939,7 @@ def measure(args):
         "probe_map": {str(k): v for k, v in probe_map.items()},
         "sigma_bmzi_map": sigma_bmzi_map,
         "sigma_reference_mode": args.sigma_reference_mode,
+        "route_lower_policy": normalize_route_lower_policy(args.route_lower_policy),
         "delta_probe_points": [float(v) for v in args._delta_offsets],
         "delta_probe_half_width_w": float(args.delta_probe_half_width_w),
         "delta_probe_step_w": float(args.delta_probe_step_w),
@@ -867,6 +1055,7 @@ def measure(args):
 def prepare_measure_args(args):
     args._mzi_ids = parse_csv_list(args.mzi_ids, int)
     args._heaters = parse_csv_list(args.heaters, str)
+    args._heaters = validate_heater_order(args._heaters, args._mzi_ids)
     args._delta_offsets = generate_delta_offsets(args)
     args._sigma_phase_points = generate_sigma_phase_points(args)
     return parse_probe_map(args.probe_map, args._mzi_ids), parse_sigma_bmzi_map(args.sigma_bmzi_map, args._mzi_ids)
@@ -889,6 +1078,7 @@ def rescan_one(args):
         "perturb_heater": args.perturb_heater,
         "scan_kind": args.scan_kind,
         "observed_mzi": int(args.observed_mzi),
+        "route_lower_policy": normalize_route_lower_policy(args.route_lower_policy),
         "dry_run": bool(args.dry_run),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
     }
@@ -994,6 +1184,7 @@ def add_common_measure_args(p):
     p.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
     p.add_argument("--sigma_bmzi_map", default="5:0,6:5,7:6,8:7")
     p.add_argument("--sigma_reference_mode", default="chained_bmzi", choices=["chained_bmzi", "direct_reference"])
+    p.add_argument("--route_lower_policy", default="zero", choices=["zero", "keep_base"])
     p.add_argument("--delta_power_w", type=float, default=0.001)
     p.add_argument("--delta_probe_points", default="9")
     p.add_argument("--delta_probe_half_width_w", type=float, default=0.001)
@@ -1040,6 +1231,7 @@ def build_parser():
     p.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
     p.add_argument("--sigma_bmzi_map", default="5:0,6:5,7:6,8:7")
     p.add_argument("--sigma_reference_mode", default="chained_bmzi", choices=["chained_bmzi", "direct_reference"])
+    p.add_argument("--route_lower_policy", default="zero", choices=["zero", "keep_base"])
     p.add_argument("--delta_power_w", type=float, default=0.001)
     p.add_argument("--delta_probe_points", default="9")
     p.add_argument("--delta_probe_half_width_w", type=float, default=0.001)

@@ -81,6 +81,7 @@ class DirectRunConfig:
     visibility_threshold: float = 0.3
     sigma_reference_mode: str = "chained_bmzi"
     sigma_bmzi_map: str = "5:0,6:5,7:6,8:7"
+    route_lower_policy: str = "zero"
     enable_scan_outlier_check: bool = True
     enable_delta_neighbor_outlier: bool = True
     enable_sigma_neighbor_outlier: bool = False
@@ -755,6 +756,82 @@ def get_mzi_state_voltage(entry, state):
     if isinstance(fit_params, list) and fit_params and fit_key in fit_params[0]:
         return float(fit_params[0][fit_key])
     raise ValueError(f"MZI entry missing {state} voltage.")
+
+
+def normalize_route_lower_policy(policy):
+    policy = str(policy or "zero").strip().lower()
+    if policy not in {"zero", "keep_base"}:
+        raise ValueError("--route_lower_policy must be zero or keep_base.")
+    return policy
+
+
+def get_route_state_voltage(entry, state):
+    state = str(state).upper()
+    if state in {"B", "C"}:
+        return get_mzi_state_voltage(entry, state)
+    if state == "H":
+        half_values = entry.get("half_power", [])
+        if not half_values:
+            raise ValueError("MZI entry missing H half_power voltage.")
+        return float(half_values[0])
+    raise ValueError(f"Unsupported route MZI state {state!r}.")
+
+
+def set_route_mzi_state(mzi_id, entry, state, working_data, write_port_voltage, lower_policy="zero"):
+    lower_policy = normalize_route_lower_policy(lower_policy)
+    ports = [int(port) for port in entry.get("ports", [])]
+    if not ports:
+        raise ValueError(f"MZI {int(mzi_id)} missing ports.")
+
+    state = str(state).upper()
+    upper_voltage = float(get_route_state_voltage(entry, state))
+    write_port_voltage(int(ports[0]), upper_voltage, working_data)
+
+    lower_port = int(ports[1]) if len(ports) >= 2 else None
+    lower_voltage = None
+    lower_zero_applied = True
+    warnings = []
+    if lower_port is None:
+        warnings.append(f"MZI{int(mzi_id)} has no lower route port for state {state}")
+    elif lower_policy == "zero":
+        lower_voltage = 0.0
+        write_port_voltage(lower_port, lower_voltage, working_data)
+    else:
+        lower_voltage = float(get_port_voltage(working_data, lower_port))
+        lower_zero_applied = False
+        warnings.append(
+            f"route_lower_policy=keep_base kept lower arm for MZI{int(mzi_id)} at {lower_voltage:.6f} V"
+        )
+
+    return {
+        "mzi_id": int(mzi_id),
+        "state": state,
+        "upper_port": int(ports[0]),
+        "lower_port": lower_port,
+        "upper_voltage": upper_voltage,
+        "lower_voltage": lower_voltage,
+        "lower_zero_applied": bool(lower_zero_applied),
+        "warning": "; ".join(warnings),
+    }
+
+
+def route_records_to_fields(records, lower_policy):
+    records = list(records)
+    warnings = [str(record.get("warning", "")).strip() for record in records if str(record.get("warning", "")).strip()]
+    route_lower_zero_applied = bool(all(record.get("lower_zero_applied", True) for record in records))
+    return {
+        "route_mzi_ids": json.dumps([int(record["mzi_id"]) for record in records]),
+        "route_states": json.dumps([str(record["state"]) for record in records]),
+        "route_upper_ports": json.dumps([int(record["upper_port"]) for record in records]),
+        "route_lower_ports": json.dumps([record["lower_port"] for record in records]),
+        "route_upper_voltages": json.dumps([float(record["upper_voltage"]) for record in records]),
+        "route_lower_voltages": json.dumps(
+            [None if record["lower_voltage"] is None else float(record["lower_voltage"]) for record in records]
+        ),
+        "route_lower_policy": normalize_route_lower_policy(lower_policy),
+        "route_lower_zero_applied": route_lower_zero_applied,
+        "route_warning": "; ".join(warnings),
+    }
 
 
 def get_second_column_bar_voltages(mzi_table, mzi_ids=DEFAULT_MZI_IDS):
@@ -2752,7 +2829,19 @@ def scan_sigma_current(
     save_dir.mkdir(parents=True, exist_ok=True)
     scan_data = base_working_data.copy(deep=True)
     path, input_idx, output_idx, state, bmzi = ic.find_Bmzi_path(target, int(args.N))
-    build_bmzi_state_no_upload(path, input_idx, state, bmzi, scan_data, mzi_table, int(args.N), switch_IN, write_port_voltage)
+    route_fields = build_bmzi_state_no_upload(
+        path,
+        input_idx,
+        state,
+        bmzi,
+        scan_data,
+        mzi_table,
+        int(args.N),
+        switch_IN,
+        write_port_voltage,
+        route_lower_policy=getattr(args, "route_lower_policy", "zero"),
+        target_mzi=target,
+    )
 
     entry = mzi_table[str(target)]
     ports = [int(value) for value in entry.get("ports", [])[:2]]
@@ -2796,6 +2885,9 @@ def scan_sigma_current(
         opm_stats = read_stable_opm_point(hardware["cu"], hardware["opm2"], int(output_idx) + 1, args)
         if opm_stats["warning"]:
             warning = "; ".join([text for text in (warning, opm_stats["warning"]) if text])
+        route_warning = str(route_fields.get("route_warning", "")).strip()
+        if route_warning:
+            warning = "; ".join([text for text in (warning, route_warning) if text])
         row = {
             "target": target,
             "observed_mzi": target,
@@ -2820,6 +2912,7 @@ def scan_sigma_current(
             "input_channel": int(input_idx) + 1,
             "path": json.dumps([int(x) for x in path]),
             "state": json.dumps([str(x) for x in state]),
+            **route_fields,
             "bmzi": int(bmzi),
             "point_index": int(point_idx),
             "warning": warning,
@@ -2858,23 +2951,36 @@ def scan_sigma_current(
     return out_path
 
 
-def build_bmzi_state_no_upload(path, input_idx, state, bmzi, working_data, mzi_table, N, switch_IN, write_port_voltage):
+def build_bmzi_state_no_upload(
+    path,
+    input_idx,
+    state,
+    bmzi,
+    working_data,
+    mzi_table,
+    N,
+    switch_IN,
+    write_port_voltage,
+    route_lower_policy="zero",
+    target_mzi=None,
+):
+    route_lower_policy = normalize_route_lower_policy(route_lower_policy)
+    route_records = []
     for idx, mzi_value in enumerate(path):
         mzi_id = int(mzi_value)
         entry = mzi_table[str(mzi_id)]
+        route_state = str(state[idx]).upper()
         ports = entry.get("ports", [])
         if not ports:
             raise ValueError(f"MZI {mzi_id} missing ports.")
-        if state[idx] == "B":
-            write_port_voltage(int(ports[0]), get_mzi_state_voltage(entry, "B"), working_data)
-        elif state[idx] == "C":
-            write_port_voltage(int(ports[0]), get_mzi_state_voltage(entry, "C"), working_data)
-        elif state[idx] == "H":
-            half_values = entry.get("half_power", [])
-            if not half_values:
-                raise ValueError(f"MZI {mzi_id} missing half_power voltage.")
-            write_port_voltage(int(ports[0]), float(half_values[0]), working_data)
+        if target_mzi is not None and mzi_id == int(target_mzi):
+            write_port_voltage(int(ports[0]), get_route_state_voltage(entry, route_state), working_data)
+            continue
+        route_records.append(
+            set_route_mzi_state(mzi_id, entry, route_state, working_data, write_port_voltage, route_lower_policy)
+        )
 
+    bmzi_pair_applied = False
     if int(bmzi) != 0:
         pairs_path = Path("Scandata") / "inter_cali_pairs.json"
         pair_entry = None
@@ -2886,10 +2992,19 @@ def build_bmzi_state_no_upload(path, input_idx, state, bmzi, working_data, mzi_t
             if len(pair_ports) == 2:
                 write_port_voltage(int(pair_ports[0]), float(pair_entry.get("upper_arm_voltage", 0.0)), working_data)
                 write_port_voltage(int(pair_ports[1]), float(pair_entry.get("lower_arm_voltage", 0.0)), working_data)
+                bmzi_pair_applied = True
 
     for channel in range(1, int(N)):
         switch_IN(channel, "OFF", working_data)
     switch_IN(int(input_idx) + 1, "ON", working_data)
+    route_fields = route_records_to_fields(route_records, route_lower_policy)
+    if int(bmzi) == 0:
+        route_fields["bmzi_route_note"] = "bmzi=0 top straight reference"
+    elif bmzi_pair_applied:
+        route_fields["bmzi_route_note"] = f"bmzi={int(bmzi)} voltage pair applied from Scandata/inter_cali_pairs.json"
+    else:
+        route_fields["bmzi_route_note"] = f"bmzi={int(bmzi)} metadata only; no separate B/C/H route state applied"
+    return route_fields
 
 
 def acquire_current_theta_scans(base_working_data, hardware, mzi_table, args, current_dir):
@@ -2951,6 +3066,7 @@ def measure_theta_selected(args):
         "current_dir": str(current_dir),
         "reference_dir": str(args.reference_dir),
         "scan_profile": args.scan_profile,
+        "route_lower_policy": normalize_route_lower_policy(getattr(args, "route_lower_policy", "zero")),
         "opm_reads_per_point": int(getattr(args, "opm_reads_per_point", 3)),
         "collect_all_opm_channels": True,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -3714,6 +3830,7 @@ def build_parser():
         p.add_argument("--visibility_threshold", type=float, default=0.3)
         p.add_argument("--sigma_reference_mode", default="chained_bmzi", choices=["chained_bmzi", "direct_reference"])
         p.add_argument("--sigma_bmzi_map", default="5:0,6:5,7:6,8:7")
+        p.add_argument("--route_lower_policy", default="zero", choices=["zero", "keep_base"])
         p.add_argument("--enable_scan_outlier_check", type=parse_bool, default=True)
         p.add_argument("--enable_delta_neighbor_outlier", type=parse_bool, default=True)
         p.add_argument("--enable_sigma_neighbor_outlier", type=parse_bool, default=False)
@@ -3840,6 +3957,7 @@ def build_parser():
     p_selected.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
     p_selected.add_argument("--sigma_reference_mode", default="chained_bmzi", choices=["chained_bmzi", "direct_reference"])
     p_selected.add_argument("--sigma_bmzi_map", default="5:0,6:5,7:6,8:7")
+    p_selected.add_argument("--route_lower_policy", default="zero", choices=["zero", "keep_base"])
     p_selected.add_argument("--scan_profile", default="full", choices=["full", "fast", "ultra_fast", "custom"])
     p_selected.add_argument("--probe_half_width_w", type=float, default=0.001)
     p_selected.add_argument("--probe_step_w", type=float, default=0.00025)
