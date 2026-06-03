@@ -2439,24 +2439,104 @@ def read_opm_power_uW(cu, opm, output_channel):
     return float(values[idx]) * 1e6
 
 
+def read_all_opm_powers_uW(cu, opm):
+    return np.asarray([float(value) * 1e6 for value in cu.read_pow(opm)], dtype=float)
+
+
 def read_opm_power_uW_repeated(cu, opm, output_channel, reads, interval_s):
-    values = []
-    for idx in range(max(1, int(reads))):
-        values.append(read_opm_power_uW(cu, opm, output_channel))
-        if idx + 1 < max(1, int(reads)):
+    samples = []
+    read_count = max(1, int(reads))
+    for idx in range(read_count):
+        samples.append(read_all_opm_powers_uW(cu, opm))
+        if idx + 1 < read_count:
             time.sleep(float(interval_s))
-    arr = np.asarray(values, dtype=float)
-    median = float(np.median(arr))
-    mean = float(np.mean(arr))
-    std = float(np.std(arr))
-    return {
-        "opm_raw_uW": json.dumps([float(v) for v in arr]),
-        "opm_mean_uW": mean,
-        "opm_std_uW": std,
-        "opm_median_uW": median,
-        "opm_relative_std": float(std / max(abs(mean), 1e-9)),
-        "opm_read_count": int(arr.size),
+    all_values = np.vstack(samples)
+    output_idx = int(output_channel) - 1
+    if output_idx < 0 or output_idx >= all_values.shape[1]:
+        raise IndexError(f"Output channel {output_channel} not available from OPM readout.")
+    selected = all_values[:, output_idx]
+    mean = np.mean(all_values, axis=0)
+    std = np.std(all_values, axis=0)
+    median = np.median(all_values, axis=0)
+    selected_mean = float(mean[output_idx])
+    selected_std = float(std[output_idx])
+    result = {
+        "opm_raw_uW": json.dumps([float(v) for v in selected]),
+        "opm_mean_uW": selected_mean,
+        "opm_std_uW": selected_std,
+        "opm_median_uW": float(median[output_idx]),
+        "opm_relative_std": float(selected_std / max(abs(selected_mean), 1e-9)),
+        "opm_read_count": int(all_values.shape[0]),
+        "opm_all_raw_uW": json.dumps([[float(v) for v in row] for row in all_values]),
+        "opm_all_mean_uW": json.dumps([float(v) for v in mean]),
+        "opm_all_std_uW": json.dumps([float(v) for v in std]),
+        "opm_all_median_uW": json.dumps([float(v) for v in median]),
+        "opm_all_relative_std": json.dumps([float(s / max(abs(m), 1e-9)) for s, m in zip(std, mean)]),
+        "opm_channel_count": int(all_values.shape[1]),
     }
+    for channel_idx, value in enumerate(median, start=1):
+        result[f"opm_ch{channel_idx}_median_uW"] = float(value)
+    for channel_idx, value in enumerate(mean, start=1):
+        result[f"opm_ch{channel_idx}_mean_uW"] = float(value)
+    return result
+
+
+def append_opm_all_channels_log(log_path, metadata, opm_stats):
+    if "opm_all_median_uW" not in opm_stats:
+        return
+    columns = [
+        "timestamp",
+        "scan_type",
+        "mzi_id",
+        "point_index",
+        "scan_axis",
+        "scan_value",
+        "input_channel",
+        "output_channel",
+        "target_power_w",
+        "voltage_v",
+        "p_primary",
+        "p_secondary",
+        "v_primary",
+        "v_secondary",
+        "bmzi",
+        "opm_channel",
+        "is_target_output",
+        "opm_median_uW",
+        "opm_mean_uW",
+        "opm_std_uW",
+        "opm_relative_std",
+        "opm_raw_uW",
+    ]
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    medians = json.loads(opm_stats["opm_all_median_uW"])
+    means = json.loads(opm_stats["opm_all_mean_uW"])
+    stds = json.loads(opm_stats["opm_all_std_uW"])
+    rel_stds = json.loads(opm_stats["opm_all_relative_std"])
+    raw = np.asarray(json.loads(opm_stats["opm_all_raw_uW"]), dtype=float)
+    rows = []
+    for channel_idx, median_uW in enumerate(medians, start=1):
+        raw_values = raw[:, channel_idx - 1] if raw.ndim == 2 and raw.shape[1] >= channel_idx else np.array([])
+        rows.append(
+            {
+                **metadata,
+                "opm_channel": int(channel_idx),
+                "is_target_output": bool(channel_idx == int(metadata.get("output_channel", -1))),
+                "opm_median_uW": float(median_uW),
+                "opm_mean_uW": float(means[channel_idx - 1]),
+                "opm_std_uW": float(stds[channel_idx - 1]),
+                "opm_relative_std": float(rel_stds[channel_idx - 1]),
+                "opm_raw_uW": json.dumps([float(v) for v in raw_values]),
+            }
+        )
+    pd.DataFrame(rows).reindex(columns=columns).to_csv(
+        log_path,
+        mode="a",
+        header=not log_path.exists(),
+        index=False,
+        float_format="%.12f",
+    )
 
 
 def read_stable_opm_point(cu, opm, output_channel, args):
@@ -2569,7 +2649,7 @@ def scan_delta_probe_current(
     offsets = getattr(args, "_delta_offsets", None)
     if offsets is None:
         offsets = build_probe_offsets(args.probe_half_width_w, args.probe_step_w)
-    for offset in offsets:
+    for point_idx, offset in enumerate(offsets, start=1):
         scan_data = base_working_data.copy(deep=True)
         target_power = float(baseline_power) + float(offset)
         warning = ""
@@ -2589,28 +2669,51 @@ def scan_delta_probe_current(
         opm_stats = read_stable_opm_point(hardware["cu"], hardware["opm2"], output_channel, args)
         if opm_stats["warning"]:
             warning = "; ".join([text for text in (warning, opm_stats["warning"]) if text])
-        rows.append(
+        row = {
+            "mzi_id": int(observed_mzi),
+            "arm_name": info["arm_name"],
+            "arm": info["arm"],
+            "port": int(info["port"]),
+            "probe_axis_power_w": float(offset),
+            "target_power_w": float(target_power),
+            "measured_power_w": float(target_power),
+            "voltage_v": float(voltage),
+            "optical_power_uW": float(opm_stats["opm_median_uW"]),
+            "opm_raw_uW": opm_stats["opm_raw_uW"],
+            "opm_mean_uW": float(opm_stats["opm_mean_uW"]),
+            "opm_std_uW": float(opm_stats["opm_std_uW"]),
+            "opm_median_uW": float(opm_stats["opm_median_uW"]),
+            "opm_relative_std": float(opm_stats["opm_relative_std"]),
+            "opm_read_count": int(opm_stats["opm_read_count"]),
+            "input_channel": int(input_channel),
+            "output_channel": int(output_channel),
+            "scan_type": "delta_current_probe",
+            "point_index": int(point_idx),
+            "warning": warning,
+        }
+        row.update(
             {
+                key: value
+                for key, value in opm_stats.items()
+                if key.startswith("opm_all_") or key.startswith("opm_ch") or key == "opm_channel_count"
+            }
+        )
+        rows.append(row)
+        append_opm_all_channels_log(
+            save_dir.parent / "opm_all_channels_log.csv",
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "scan_type": "delta_current_probe",
                 "mzi_id": int(observed_mzi),
-                "arm_name": info["arm_name"],
-                "arm": info["arm"],
-                "port": int(info["port"]),
-                "probe_axis_power_w": float(offset),
-                "target_power_w": float(target_power),
-                "measured_power_w": float(target_power),
-                "voltage_v": float(voltage),
-                "optical_power_uW": float(opm_stats["opm_median_uW"]),
-                "opm_raw_uW": opm_stats["opm_raw_uW"],
-                "opm_mean_uW": float(opm_stats["opm_mean_uW"]),
-                "opm_std_uW": float(opm_stats["opm_std_uW"]),
-                "opm_median_uW": float(opm_stats["opm_median_uW"]),
-                "opm_relative_std": float(opm_stats["opm_relative_std"]),
-                "opm_read_count": int(opm_stats["opm_read_count"]),
+                "point_index": int(point_idx),
+                "scan_axis": "probe_axis_power_w",
+                "scan_value": float(offset),
                 "input_channel": int(input_channel),
                 "output_channel": int(output_channel),
-                "scan_type": "delta_current_probe",
-                "warning": warning,
-            }
+                "target_power_w": float(target_power),
+                "voltage_v": float(voltage),
+            },
+            opm_stats,
         )
 
     out_path = save_dir / f"obs{int(observed_mzi)}_probe.txt"
@@ -2669,7 +2772,7 @@ def scan_sigma_current(
         phase_points = parse_csv_list(args.sigma_phase_points, float)
     rows = []
 
-    for dp in phase_points:
+    for point_idx, dp in enumerate(phase_points, start=1):
         p_upper_unfolded = p_upper_base + float(dp) / np.pi * ppi[0]
         p_lower_unfolded = p_lower_base + float(dp) / np.pi * ppi[1]
         p_upper, upper_folds = fold_power_to_limit(p_upper_unfolded, period_upper, args.power_limit_w)
@@ -2693,34 +2796,60 @@ def scan_sigma_current(
         opm_stats = read_stable_opm_point(hardware["cu"], hardware["opm2"], int(output_idx) + 1, args)
         if opm_stats["warning"]:
             warning = "; ".join([text for text in (warning, opm_stats["warning"]) if text])
-        rows.append(
+        row = {
+            "target": target,
+            "observed_mzi": target,
+            "dp": float(dp),
+            "pow(uW)": float(opm_stats["opm_median_uW"]),
+            "opm_raw_uW": opm_stats["opm_raw_uW"],
+            "opm_mean_uW": float(opm_stats["opm_mean_uW"]),
+            "opm_std_uW": float(opm_stats["opm_std_uW"]),
+            "opm_median_uW": float(opm_stats["opm_median_uW"]),
+            "opm_relative_std": float(opm_stats["opm_relative_std"]),
+            "opm_read_count": int(opm_stats["opm_read_count"]),
+            "v_primary": float(v_upper),
+            "v_secondary": float(v_lower),
+            "p_primary": float(p_upper),
+            "p_secondary": float(p_lower),
+            "p_primary_unfolded": float(p_upper_unfolded),
+            "p_secondary_unfolded": float(p_lower_unfolded),
+            "upper_fold_count": int(upper_folds),
+            "lower_fold_count": int(lower_folds),
+            "scan_type": "sigma_current_sync",
+            "output_channel": int(output_idx) + 1,
+            "input_channel": int(input_idx) + 1,
+            "path": json.dumps([int(x) for x in path]),
+            "state": json.dumps([str(x) for x in state]),
+            "bmzi": int(bmzi),
+            "point_index": int(point_idx),
+            "warning": warning,
+        }
+        row.update(
             {
-                "target": target,
-                "observed_mzi": target,
-                "dp": float(dp),
-                "pow(uW)": float(opm_stats["opm_median_uW"]),
-                "opm_raw_uW": opm_stats["opm_raw_uW"],
-                "opm_mean_uW": float(opm_stats["opm_mean_uW"]),
-                "opm_std_uW": float(opm_stats["opm_std_uW"]),
-                "opm_median_uW": float(opm_stats["opm_median_uW"]),
-                "opm_relative_std": float(opm_stats["opm_relative_std"]),
-                "opm_read_count": int(opm_stats["opm_read_count"]),
-                "v_primary": float(v_upper),
-                "v_secondary": float(v_lower),
+                key: value
+                for key, value in opm_stats.items()
+                if key.startswith("opm_all_") or key.startswith("opm_ch") or key == "opm_channel_count"
+            }
+        )
+        rows.append(row)
+        append_opm_all_channels_log(
+            save_dir.parent / "opm_all_channels_log.csv",
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "scan_type": "sigma_current_sync",
+                "mzi_id": int(target),
+                "point_index": int(point_idx),
+                "scan_axis": "dp",
+                "scan_value": float(dp),
+                "input_channel": int(input_idx) + 1,
+                "output_channel": int(output_idx) + 1,
                 "p_primary": float(p_upper),
                 "p_secondary": float(p_lower),
-                "p_primary_unfolded": float(p_upper_unfolded),
-                "p_secondary_unfolded": float(p_lower_unfolded),
-                "upper_fold_count": int(upper_folds),
-                "lower_fold_count": int(lower_folds),
-                "scan_type": "sigma_current_sync",
-                "output_channel": int(output_idx) + 1,
-                "input_channel": int(input_idx) + 1,
-                "path": json.dumps([int(x) for x in path]),
-                "state": json.dumps([str(x) for x in state]),
+                "v_primary": float(v_upper),
+                "v_secondary": float(v_lower),
                 "bmzi": int(bmzi),
-                "warning": warning,
-            }
+            },
+            opm_stats,
         )
 
     out_path = save_dir / f"obs{target}_inter_scan.txt"
@@ -2796,6 +2925,121 @@ def acquire_current_theta_scans(base_working_data, hardware, mzi_table, args, cu
         context_label=f"iteration {iter_label}: restore optimized second-column state after theta scans",
     )
     run_log(f"[ColumnPhaseOptimize] iteration {iter_label}: finished automatic current theta scans")
+    return current_dir
+
+
+def measure_theta_selected(args):
+    if not args.dry_run and not parse_bool(getattr(args, "confirm_hardware", False)):
+        raise RuntimeError("Refusing hardware write: set --confirm_hardware true with --dry_run false.")
+
+    measure_mzi_ids = parse_csv_list(args.measure_mzi_ids, int)
+    all_mzi_ids = parse_csv_list(args.all_mzi_ids, int)
+    if not measure_mzi_ids:
+        raise ValueError("--measure_mzi_ids cannot be empty.")
+    missing = [mzi_id for mzi_id in measure_mzi_ids if mzi_id not in all_mzi_ids]
+    if missing:
+        raise ValueError(f"--measure_mzi_ids must be contained in --all_mzi_ids; missing {missing}")
+
+    current_dir = Path(args.current_dir)
+    current_dir.mkdir(parents=True, exist_ok=True)
+    config_path = current_dir / f"selected_measurement_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    config = {
+        "mode": "measure_theta_selected",
+        "measure_mzi_ids": measure_mzi_ids,
+        "all_mzi_ids": all_mzi_ids,
+        "current_power": str(resolve_current_power_path(args)),
+        "current_dir": str(current_dir),
+        "reference_dir": str(args.reference_dir),
+        "scan_profile": args.scan_profile,
+        "opm_reads_per_point": int(getattr(args, "opm_reads_per_point", 3)),
+        "collect_all_opm_channels": True,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "dry_run": bool(args.dry_run),
+    }
+    with config_path.open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+    run_log(f"[ColumnPhaseOptimize] selected theta measurement config saved to {config_path}")
+
+    if args.dry_run:
+        run_log(f"[ColumnPhaseOptimize] dry run: would measure MZIs {measure_mzi_ids} into {current_dir}")
+        return current_dir
+
+    import utils.communication as cu
+    from inter_calibration import write_port_voltage
+
+    mzi_table = load_mzi_table(args.mzi_table)
+    heater_labels = heater_labels_for_mzis(all_mzi_ids)
+    heater_info = get_second_column_heater_info(mzi_table, all_mzi_ids)
+    powers = load_current_power_csv(resolve_current_power_path(args), heater_labels)
+    probe_map = parse_probe_map(args.probe_map, all_mzi_ids)
+    args._delta_offsets, args._sigma_points = scan_profile_points(args, 0)
+
+    hardware = {
+        "cu": cu,
+        "mcv": cu.open_ser_connection(args.ser_address),
+        "opm2": cu.open_VISA_connection(args.opm2_address),
+    }
+    if hardware["mcv"] is None:
+        raise RuntimeError(f"Failed to open serial port {args.ser_address}.")
+    if hardware["opm2"] is None:
+        raise RuntimeError(f"Failed to open OPM2 {args.opm2_address}.")
+
+    try:
+        working_data = cu.generate_working_data()
+        apply_power_vector_to_working_data(working_data, heater_info, powers, write_port_voltage)
+        upload_working_data_checked(
+            hardware["cu"],
+            hardware["mcv"],
+            working_data,
+            args.voltage_limit_v,
+            context_label="selected theta measurement: upload current second-column state",
+        )
+        time.sleep(float(args.settle_time))
+        base_snapshot = working_data.copy(deep=True)
+
+        delta_dir = current_dir / "delta_current"
+        sigma_dir = current_dir / "sigma_current"
+        for mzi_id in measure_mzi_ids:
+            scan_delta_probe_current(
+                mzi_id,
+                probe_map[str(int(mzi_id))],
+                delta_dir,
+                base_snapshot,
+                hardware,
+                mzi_table,
+                args,
+            )
+        for mzi_id in measure_mzi_ids:
+            scan_sigma_current(mzi_id, sigma_dir, base_snapshot, hardware, mzi_table, args)
+
+        working_data.iloc[:, 0] = base_snapshot.iloc[:, 0].to_numpy(copy=True)
+        upload_working_data_checked(
+            hardware["cu"],
+            hardware["mcv"],
+            working_data,
+            args.voltage_limit_v,
+            context_label="selected theta measurement: restore current second-column state",
+        )
+        time.sleep(float(args.settle_time))
+    finally:
+        for handle in (hardware.get("mcv"), hardware.get("opm2")):
+            close = getattr(handle, "close", None)
+            if callable(close):
+                close()
+
+    if getattr(args, "out_csv", None):
+        try:
+            measure_current_theta(
+                args.reference_dir,
+                current_dir,
+                out_csv=args.out_csv,
+                strict_phase_jump=getattr(args, "strict_phase_jump", False),
+                visibility_threshold=getattr(args, "visibility_threshold", 0.3),
+                args=args,
+            )
+        except Exception as exc:
+            run_log(f"[ColumnPhaseOptimize] selected measurement saved, but theta synthesis failed: {exc}")
+    run_log(f"[ColumnPhaseOptimize] selected theta measurement saved to {current_dir}")
     return current_dir
 
 
@@ -3585,6 +3829,46 @@ def build_parser():
     p_iter.add_argument("--sigma_phase_points", default="0,0.785398,1.570796,2.356194,3.141593,3.926991,4.712389,5.497787,6.283185")
     p_iter.add_argument("--auto_init_current_power_from_bar", type=parse_bool, default=False)
 
+    p_selected = sub.add_parser("measure_theta_selected")
+    p_selected.add_argument("--measure_mzi_ids", default="7,8")
+    p_selected.add_argument("--all_mzi_ids", default="5,6,7,8")
+    p_selected.add_argument("--mzi_table", default="Scandata/MZI_table.json")
+    p_selected.add_argument("--current_power", default="current_power_second_column.csv")
+    p_selected.add_argument("--reference_dir", default="Scandata/current_theta_reference")
+    p_selected.add_argument("--current_dir", default="Scandata/current_theta_measurement")
+    p_selected.add_argument("--out_csv", default="current_theta_second_column.csv")
+    p_selected.add_argument("--probe_map", default="5:u,6:u,7:u,8:u")
+    p_selected.add_argument("--sigma_reference_mode", default="chained_bmzi", choices=["chained_bmzi", "direct_reference"])
+    p_selected.add_argument("--sigma_bmzi_map", default="5:0,6:5,7:6,8:7")
+    p_selected.add_argument("--scan_profile", default="full", choices=["full", "fast", "ultra_fast", "custom"])
+    p_selected.add_argument("--probe_half_width_w", type=float, default=0.001)
+    p_selected.add_argument("--probe_step_w", type=float, default=0.00025)
+    p_selected.add_argument("--sigma_phase_points", default="0,0.785398,1.570796,2.356194,3.141593,3.926991,4.712389,5.497787,6.283185")
+    p_selected.add_argument("--sigma_update_interval", type=int, default=1)
+    p_selected.add_argument("--N", type=int, default=9)
+    p_selected.add_argument("--power_limit_w", type=float, default=DEFAULT_POWER_LIMIT_W)
+    p_selected.add_argument("--voltage_limit_v", type=float, default=DEFAULT_VOLTAGE_LIMIT_V)
+    p_selected.add_argument("--settle_time", type=float, default=DEFAULT_SETTLE_TIME)
+    p_selected.add_argument("--opm_reads_per_point", type=int, default=3)
+    p_selected.add_argument("--opm_read_interval_s", type=float, default=0.1)
+    p_selected.add_argument("--opm_relative_std_threshold", type=float, default=0.05)
+    p_selected.add_argument("--opm_max_retry_per_point", type=int, default=2)
+    p_selected.add_argument("--strict_phase_jump", type=parse_bool, default=False)
+    p_selected.add_argument("--visibility_threshold", type=float, default=0.3)
+    p_selected.add_argument("--enable_scan_outlier_check", type=parse_bool, default=True)
+    p_selected.add_argument("--enable_delta_neighbor_outlier", type=parse_bool, default=True)
+    p_selected.add_argument("--enable_sigma_neighbor_outlier", type=parse_bool, default=False)
+    p_selected.add_argument("--sigma_min_points_for_outlier_removal", type=int, default=7)
+    p_selected.add_argument("--outlier_neighbor_ratio", type=float, default=0.3)
+    p_selected.add_argument("--outlier_residual_sigma", type=float, default=3.0)
+    p_selected.add_argument("--outlier_amplitude_ratio", type=float, default=0.3)
+    p_selected.add_argument("--max_outliers_per_scan", type=int, default=1)
+    p_selected.add_argument("--refit_without_outliers", type=parse_bool, default=True)
+    p_selected.add_argument("--dry_run", type=parse_bool, default=True)
+    p_selected.add_argument("--confirm_hardware", type=parse_bool, default=False)
+    p_selected.add_argument("--ser_address", default="COM3")
+    p_selected.add_argument("--opm2_address", default=DEFAULT_OPM2_ADDRESS)
+
     p_verify = sub.add_parser("verify_step")
     add_common(p_verify)
     p_verify.add_argument("--current_power", required=True)
@@ -3632,6 +3916,8 @@ def main():
         simulate(args)
     elif args.mode == "iterate":
         iterate(args)
+    elif args.mode == "measure_theta_selected":
+        measure_theta_selected(args)
     elif args.mode == "verify_step":
         verify_step(args)
     else:
