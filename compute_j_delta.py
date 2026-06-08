@@ -5,11 +5,28 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize_scalar
 
 
 OBSERVED_MZIS = [5, 6, 7, 8]
 PERTURBED_HEATERS = ["5u", "5d", "6u", "6d", "7u", "7d", "8u", "8d"]
+SIGMA_COEFF = 2.0
+FIT_EPS = 1e-12
+MAX_NORMALIZED_RMSE = 0.1
+MIN_VISIBILITY = 0.05
+MAX_ABS_PHASE_SHIFT_RAD = np.pi / 2
+MAX_W_DEVIATION = 0.15
+MIN_NUM_POINTS_USED = 4
+REMEASURE_WARNING_TOKENS = {
+    "fit_failed",
+    "low_visibility",
+    "large_normalized_rmse",
+    "large_phase_shift",
+    "not_enough_points",
+    "short_scan_fit_failed",
+    "short_scan_not_enough_points",
+    "short_scan_large_residual",
+}
 ARM_ALIASES = {
     "u": "u",
     "upper": "u",
@@ -128,6 +145,139 @@ def rmse(y_true, y_pred):
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
+def _warning_items(value):
+    if value is None:
+        return []
+    if isinstance(value, float) and np.isnan(value):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = []
+        for item in value:
+            items.extend(_warning_items(item))
+        return items
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "nan", "null"}:
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        text = text.strip("[]").replace("'", "").replace('"', "")
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return [part.strip() for part in text.split(";") if part.strip()]
+
+
+def join_warnings(warnings):
+    seen = set()
+    result = []
+    for item in _warning_items(warnings):
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return "; ".join(result)
+
+
+def append_warning(existing_warning, new_warning):
+    return join_warnings([existing_warning, new_warning])
+
+
+def split_warning_tokens(value):
+    return [item for item in join_warnings(value).split("; ") if item]
+
+
+def fit_scalar(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return value if np.isfinite(value) else np.nan
+
+
+def format_float(value, digits=4):
+    value = fit_scalar(value)
+    if not np.isfinite(value):
+        return "nan"
+    return f"{value:.{digits}g}"
+
+
+def compute_visibility(y_values, all_y_values=None):
+    y = np.asarray(y_values, dtype=float)
+    y = y[np.isfinite(y)]
+    warnings = []
+    if all_y_values is not None:
+        all_y = np.asarray(all_y_values, dtype=float)
+        if np.any(all_y[np.isfinite(all_y)] < 0.0):
+            warnings.append("negative_optical_power_seen")
+    if y.size < 2:
+        warnings.append("visibility_not_enough_points")
+        return np.nan, warnings
+    i_max = float(np.max(y))
+    i_min = float(np.min(y))
+    denom = i_max + i_min
+    if abs(denom) <= FIT_EPS:
+        warnings.append("visibility_denominator_near_zero")
+        return np.nan, warnings
+    return float((i_max - i_min) / denom), warnings
+
+
+def compute_fit_visibility(A, b):
+    A = fit_scalar(A)
+    b = fit_scalar(b)
+    if not np.isfinite(A) or not np.isfinite(b) or abs(b) <= FIT_EPS:
+        return np.nan, ["visibility_denominator_near_zero"]
+    return float(2.0 * abs(A) / b), []
+
+
+def augment_fit_result(fit, x_all, y_all, outlier_indices=None, full_rmse_before=None, fit_warning=""):
+    outlier_indices = [] if outlier_indices is None else [int(idx) for idx in outlier_indices]
+    warnings = split_warning_tokens(fit_warning)
+    y_used = np.asarray(fit.get("y", []), dtype=float)
+    visibility, visibility_warnings = compute_visibility(y_used, all_y_values=y_all)
+    fit_visibility, fit_visibility_warnings = compute_fit_visibility(fit.get("A", np.nan), fit.get("b", np.nan))
+    warnings.extend(visibility_warnings)
+    warnings.extend(fit_visibility_warnings)
+
+    amplitude = abs(fit_scalar(fit.get("A", np.nan)))
+    rmse_value = fit_scalar(fit.get("rmse_uW", np.nan))
+    if not np.isfinite(amplitude) or amplitude <= FIT_EPS:
+        normalized_rmse = np.nan
+        warnings.append("amplitude_too_small_for_normalized_rmse")
+    else:
+        normalized_rmse = float(rmse_value / amplitude) if np.isfinite(rmse_value) else np.nan
+
+    full_rmse = fit_scalar(full_rmse_before)
+    if not np.isfinite(full_rmse):
+        full_rmse = rmse_value
+
+    x_all = np.asarray(x_all, dtype=float)
+    y_all = np.asarray(y_all, dtype=float)
+    fit.update(
+        {
+            "fit_mode": fit.get("fit_mode", "full_free_fit"),
+            "visibility": visibility,
+            "fit_visibility": fit_visibility,
+            "normalized_rmse": normalized_rmse,
+            "num_points": int(len(x_all)),
+            "num_points_used": int(len(fit.get("x", []))),
+            "outlier_removed": bool(outlier_indices),
+            "outlier_indices": outlier_indices,
+            "outlier_indices_text": json.dumps(outlier_indices),
+            "full_rmse_before_outlier_removal": full_rmse,
+            "full_rmse_before_outlier_removal_uW": full_rmse,
+            "fit_success": bool(fit.get("fit_success", True)),
+            "fit_warning": join_warnings(warnings),
+        }
+    )
+    if outlier_indices:
+        excluded_x = [float(x_all[idx]) for idx in outlier_indices if idx < len(x_all)]
+        excluded_y = [float(y_all[idx]) for idx in outlier_indices if idx < len(y_all)]
+        fit["excluded_index"] = ",".join(str(idx) for idx in outlier_indices)
+        fit["excluded_x"] = np.asarray(excluded_x, dtype=float)
+        fit["excluded_y"] = np.asarray(excluded_y, dtype=float)
+    else:
+        fit["excluded_index"] = ""
+        fit["excluded_x"] = np.asarray([], dtype=float)
+        fit["excluded_y"] = np.asarray([], dtype=float)
+    return fit
+
+
 def _sin_model_fixed_w(P, A, phi, b, w_fixed):
     return sin_model(P, A, w_fixed, phi, b)
 
@@ -167,17 +317,21 @@ def fit_probe_curve(power_w, optical_power_uW, init_params, fix_w=True):
         A, w, phi, b = popt
 
     fitted = sin_model(power_w, A, w, phi, b)
-    rmse = float(np.sqrt(np.mean((optical_power_uW - fitted) ** 2)))
-    return {
+    rmse_value = float(np.sqrt(np.mean((optical_power_uW - fitted) ** 2)))
+    result = {
         "A": float(A),
         "w": float(w),
         "phi": float(wrap_to_pi(phi)),
         "b": float(b),
-        "rmse_uW": rmse,
+        "rmse_uW": rmse_value,
+        "x": power_w,
+        "y": optical_power_uW,
+        "fitted": fitted,
         "power_w": power_w,
         "optical_power_uW": optical_power_uW,
         "fitted_uW": fitted,
     }
+    return augment_fit_result(result, power_w, optical_power_uW, full_rmse_before=rmse_value)
 
 
 def wrap_to_pi(angle):
@@ -225,7 +379,7 @@ def compute_phase_shift_for_pair(baseline_file, perturbed_file, init_params, pro
     delta_delta = delta_eta if probe_arm == "u" else -delta_eta
     warning = ""
     if abs(delta_eta) > np.pi / 2:
-        warning = "abs(delta_eta_rad) > pi/2; possible phase-branch jump or too-large perturbation"
+        warning = "large_phase_shift"
 
     return {
         "baseline_scan": baseline_scan,
@@ -247,68 +401,144 @@ def plot_fit_comparison(
     probe_arm,
     perturbed_heater,
     out_path,
+    quality_warning="",
 ):
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    baseline_x_all = np.concatenate([baseline_fit["power_w"], np.asarray(baseline_fit.get("excluded_x", []), dtype=float)])
-    perturbed_x_all = np.concatenate([perturbed_fit["power_w"], np.asarray(perturbed_fit.get("excluded_x", []), dtype=float)])
+    def fit_x(fit):
+        return np.asarray(fit.get("power_w", fit.get("x", [])), dtype=float)
+
+    def fit_y(fit):
+        return np.asarray(fit.get("optical_power_uW", fit.get("y", [])), dtype=float)
+
+    def model_y(fit, x_values):
+        return sin_model(x_values, fit["A"], fit["w"], fit["phi"], fit["b"])
+
+    baseline_x = fit_x(baseline_fit)
+    baseline_y = fit_y(baseline_fit)
+    perturbed_x = fit_x(perturbed_fit)
+    perturbed_y = fit_y(perturbed_fit)
+    baseline_x_all = np.concatenate([baseline_x, np.asarray(baseline_fit.get("excluded_x", []), dtype=float)])
+    perturbed_x_all = np.concatenate([perturbed_x, np.asarray(perturbed_fit.get("excluded_x", []), dtype=float)])
     p_min = min(np.min(baseline_x_all), np.min(perturbed_x_all))
     p_max = max(np.max(baseline_x_all), np.max(perturbed_x_all))
     p_grid = np.linspace(p_min, p_max, 400)
 
-    plt.figure(figsize=(7, 5))
-    plt.plot(
-        baseline_fit["power_w"] * 1000.0,
-        baseline_fit["optical_power_uW"],
+    is_sigma = str(probe_arm).strip().lower() == "sigma"
+    x_scale = 1.0 if is_sigma else 1000.0
+    x_label = "Sigma scan phase dp (rad)" if is_sigma else "Probe heater power (mW)"
+
+    fig, (ax_fit, ax_resid) = plt.subplots(
+        2,
+        1,
+        figsize=(8.4, 6.4),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    ax_fit.plot(
+        baseline_x * x_scale,
+        baseline_y,
         "o",
         markersize=4,
         label="baseline data",
     )
-    plt.plot(
-        p_grid * 1000.0,
-        sin_model(p_grid, baseline_fit["A"], baseline_fit["w"], baseline_fit["phi"], baseline_fit["b"]),
+    ax_fit.plot(
+        p_grid * x_scale,
+        model_y(baseline_fit, p_grid),
         "-",
         linewidth=1.5,
         label="baseline fit",
     )
     if len(baseline_fit.get("excluded_x", [])):
-        plt.plot(
-            np.asarray(baseline_fit["excluded_x"]) * 1000.0,
-            baseline_fit["excluded_y"],
+        excluded_x = np.asarray(baseline_fit["excluded_x"], dtype=float)
+        excluded_y = np.asarray(baseline_fit["excluded_y"], dtype=float)
+        ax_fit.plot(
+            excluded_x * x_scale,
+            excluded_y,
             "x",
             markersize=8,
             label="baseline excluded",
         )
-    plt.plot(
-        perturbed_fit["power_w"] * 1000.0,
-        perturbed_fit["optical_power_uW"],
+        ax_resid.plot(
+            excluded_x * x_scale,
+            excluded_y - model_y(baseline_fit, excluded_x),
+            "x",
+            markersize=8,
+            label="baseline excluded residual",
+        )
+    ax_fit.plot(
+        perturbed_x * x_scale,
+        perturbed_y,
         "s",
         markersize=4,
         label="perturbed data",
     )
-    plt.plot(
-        p_grid * 1000.0,
-        sin_model(p_grid, perturbed_fit["A"], perturbed_fit["w"], perturbed_fit["phi"], perturbed_fit["b"]),
+    ax_fit.plot(
+        p_grid * x_scale,
+        model_y(perturbed_fit, p_grid),
         "-",
         linewidth=1.5,
         label="perturbed fit",
     )
     if len(perturbed_fit.get("excluded_x", [])):
-        plt.plot(
-            np.asarray(perturbed_fit["excluded_x"]) * 1000.0,
-            perturbed_fit["excluded_y"],
+        excluded_x = np.asarray(perturbed_fit["excluded_x"], dtype=float)
+        excluded_y = np.asarray(perturbed_fit["excluded_y"], dtype=float)
+        ax_fit.plot(
+            excluded_x * x_scale,
+            excluded_y,
             "x",
             markersize=8,
             label="perturbed excluded",
         )
-    plt.xlabel("Probe heater power (mW)")
-    plt.ylabel("Bar optical power (uW)")
-    plt.title(f"obs{observed_mzi} probe {probe_arm}, perturb {perturbed_heater}")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=160)
+        ax_resid.plot(
+            excluded_x * x_scale,
+            excluded_y - model_y(perturbed_fit, excluded_x),
+            "x",
+            markersize=8,
+            label="perturbed excluded residual",
+        )
+
+    base_residual = baseline_y - model_y(baseline_fit, baseline_x)
+    pert_residual = perturbed_y - model_y(perturbed_fit, perturbed_x)
+    ax_resid.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+    ax_resid.plot(baseline_x * x_scale, base_residual, "o", markersize=3, label="baseline residual")
+    ax_resid.plot(perturbed_x * x_scale, pert_residual, "s", markersize=3, label="perturbed residual")
+
+    ax_fit.set_ylabel("Optical power (uW)")
+    ax_resid.set_ylabel("Residual (uW)")
+    ax_resid.set_xlabel(x_label)
+    title = f"{'sigma' if is_sigma else 'delta'} obs{observed_mzi} perturb {perturbed_heater}"
+    if not is_sigma:
+        title += f" probe {probe_arm}"
+    ax_fit.set_title(title)
+    info = (
+        f"base A={format_float(baseline_fit.get('A'))}, w={format_float(baseline_fit.get('w'))}, "
+        f"phi={format_float(baseline_fit.get('phi'))}, b={format_float(baseline_fit.get('b'))}, "
+        f"RMSE={format_float(baseline_fit.get('rmse_uW'))}, nRMSE={format_float(baseline_fit.get('normalized_rmse'))}, "
+        f"vis={format_float(baseline_fit.get('visibility'))}, out={baseline_fit.get('outlier_indices_text', '[]')}\n"
+        f"pert A={format_float(perturbed_fit.get('A'))}, w={format_float(perturbed_fit.get('w'))}, "
+        f"phi={format_float(perturbed_fit.get('phi'))}, b={format_float(perturbed_fit.get('b'))}, "
+        f"RMSE={format_float(perturbed_fit.get('rmse_uW'))}, nRMSE={format_float(perturbed_fit.get('normalized_rmse'))}, "
+        f"vis={format_float(perturbed_fit.get('visibility'))}, out={perturbed_fit.get('outlier_indices_text', '[]')}\n"
+        f"warning={join_warnings(quality_warning)}"
+    )
+    ax_fit.text(
+        0.01,
+        0.02,
+        info,
+        transform=ax_fit.transAxes,
+        fontsize=7,
+        va="bottom",
+        ha="left",
+        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.78, "edgecolor": "0.75"},
+    )
+    ax_fit.grid(True, alpha=0.3)
+    ax_resid.grid(True, alpha=0.3)
+    ax_fit.legend(fontsize=8, loc="best")
+    ax_resid.legend(fontsize=8, loc="best")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
     plt.close()
 
 
@@ -402,6 +632,34 @@ def parse_sigma_bmzi_map(text, mzi_ids):
     return {str(int(mzi_id)): int(parsed[str(int(mzi_id))]) for mzi_id in mzi_ids}
 
 
+def sigma_theory_note():
+    """
+    Sigma theory used by the sigma inter-scan Jacobian.
+
+    For a small MZI, Sigma=theta_u+theta_d and Delta=theta_u-theta_d.
+    Its common transfer phase contains exp(j*Sigma/2). In the large-MZI
+    inter scan, the measured interference phase for target MZI i against
+    bmzi is therefore
+
+        Phi_i = (Sigma_i - Sigma_bmzi) / 2 + constant.
+
+    A perturbation shifts the fitted inter-scan phase by delta_beta_i, which
+    equals delta_Phi_i. Therefore
+
+        delta_Sigma_i - delta_Sigma_bmzi = 2.0 * delta_beta_i.
+
+    This is why relative_sigma_link_rad must remain
+    SIGMA_COEFF * delta_beta_rad with SIGMA_COEFF = 2.0. Do not change this
+    coefficient to 1.0.
+    """
+    return (
+        "Each small MZI transfer term carries exp(j*Sigma/2). The large-MZI "
+        "interference phase is therefore (Sigma_i - Sigma_bmzi)/2 plus a "
+        "constant. The fitted phase shift delta_beta equals the interference "
+        "phase shift, so the relative Sigma link is 2*delta_beta."
+    )
+
+
 def compute_global_sigma_from_relative_links(relative_links, sigma_bmzi_map, mzi_ids, mode):
     mode = str(mode or "chained_bmzi").strip().lower()
     if mode not in {"chained_bmzi", "direct_reference"}:
@@ -460,8 +718,8 @@ def load_generic_scan(path, x_candidates, y_candidates=("optical_power_uW", "pow
     x = pd.to_numeric(df[x_col], errors="coerce").to_numpy(dtype=float)
     y = pd.to_numeric(df[y_col], errors="coerce").to_numpy(dtype=float)
     valid = np.isfinite(x) & np.isfinite(y)
-    if np.count_nonzero(valid) < 4:
-        raise ValueError(f"{path} has fewer than four valid points.")
+    if np.count_nonzero(valid) < 3:
+        raise ValueError(f"{path} has fewer than three valid points.")
     order = np.argsort(x[valid])
     return {"path": path, "df": df, "x": x[valid][order], "y": y[valid][order], "x_col": x_col, "y_col": y_col}
 
@@ -484,10 +742,12 @@ def fit_sine_free_or_fixed(x, y, fix_w=None, init_params=None, remove_one_outlie
         if fix_w is None:
             popt, _ = curve_fit(sin_model, x_fit, y_fit, p0=[A0, w0, phi0, b0], bounds=([0.0, 0.0, -np.inf, -np.inf], [np.inf, np.inf, np.inf, np.inf]), maxfev=50000)
             A, w, phi, b = popt
+            fit_mode = "full_free_fit"
         else:
             w = float(fix_w)
             popt, _ = curve_fit(lambda xx, A, phi, b: sin_model(xx, A, w, phi, b), x_fit, y_fit, p0=[A0, phi0, b0], bounds=([0.0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]), maxfev=50000)
             A, phi, b = popt
+            fit_mode = "full_fixed_w_fit_A_phi_b"
         fitted = sin_model(x_fit, A, w, phi, b)
         return {
             "A": float(A),
@@ -495,6 +755,7 @@ def fit_sine_free_or_fixed(x, y, fix_w=None, init_params=None, remove_one_outlie
             "phi": wrap_to_pi(phi),
             "b": float(b),
             "rmse_uW": rmse(y_fit, fitted),
+            "fit_mode": fit_mode,
             "x": x_fit,
             "y": y_fit,
             "fitted": fitted,
@@ -505,6 +766,7 @@ def fit_sine_free_or_fixed(x, y, fix_w=None, init_params=None, remove_one_outlie
         }
 
     full_fit = fit_core(x, y)
+    full_fit = augment_fit_result(full_fit, x, y, full_rmse_before=full_fit["rmse_uW"])
     if not remove_one_outlier or len(x) < 7:
         return full_fit
 
@@ -532,12 +794,266 @@ def fit_sine_free_or_fixed(x, y, fix_w=None, init_params=None, remove_one_outlie
     if not improves_enough:
         return full_fit
 
-    best_fit["excluded_index"] = int(best_drop_idx)
-    best_fit["excluded_x"] = np.asarray([x[best_drop_idx]], dtype=float)
-    best_fit["excluded_y"] = np.asarray([y[best_drop_idx]], dtype=float)
-    best_fit["outlier_removed"] = True
-    best_fit["full_rmse_before_outlier_removal_uW"] = float(full_fit["rmse_uW"])
-    return best_fit
+    return augment_fit_result(
+        best_fit,
+        x,
+        y,
+        outlier_indices=[best_drop_idx],
+        full_rmse_before=float(full_fit["rmse_uW"]),
+    )
+
+
+def scan_sigma_mode(scan):
+    df = scan.get("df", pd.DataFrame())
+    if "sigma_scan_mode" not in df.columns:
+        return "full"
+    values = df["sigma_scan_mode"].dropna().astype(str).str.strip().str.lower()
+    values = values[values != ""]
+    if values.empty:
+        return "full"
+    mode = str(values.iloc[0])
+    return mode if mode in {"full", "short"} else "full"
+
+
+def fit_sigma_short_phi_only(x, y, baseline_fit):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    warnings = ["short_scan_used", "short_scan_phi_only_fit", "short_scan_fixed_A_b_assumption"]
+    if len(x) < 3:
+        warnings.extend(["short_scan_not_enough_points", "short_scan_fit_failed"])
+        result = {
+            "A": fit_scalar(baseline_fit.get("A", np.nan)),
+            "w": fit_scalar(baseline_fit.get("w", np.nan)),
+            "phi": fit_scalar(baseline_fit.get("phi", np.nan)),
+            "b": fit_scalar(baseline_fit.get("b", np.nan)),
+            "rmse_uW": np.nan,
+            "fit_mode": "short_fixed_wab_fit_phi_only",
+            "x": x,
+            "y": y,
+            "fitted": np.full_like(y, np.nan, dtype=float),
+            "fit_success": False,
+            "fit_warning": join_warnings(warnings),
+        }
+        return augment_fit_result(result, x, y, full_rmse_before=np.nan)
+
+    A = fit_scalar(baseline_fit.get("A", np.nan))
+    w = fit_scalar(baseline_fit.get("w", np.nan))
+    b = fit_scalar(baseline_fit.get("b", np.nan))
+    phi0 = fit_scalar(baseline_fit.get("phi", 0.0))
+    if not np.isfinite(A) or not np.isfinite(w) or not np.isfinite(b) or abs(w) <= FIT_EPS:
+        warnings.extend(["short_scan_underconstrained", "short_scan_fit_failed"])
+        result = {
+            "A": A,
+            "w": w,
+            "phi": phi0,
+            "b": b,
+            "rmse_uW": np.nan,
+            "fit_mode": "short_fixed_wab_fit_phi_only",
+            "x": x,
+            "y": y,
+            "fitted": np.full_like(y, np.nan, dtype=float),
+            "fit_success": False,
+            "fit_warning": join_warnings(warnings),
+        }
+        return augment_fit_result(result, x, y, full_rmse_before=np.nan)
+
+    if len(x) < MIN_NUM_POINTS_USED:
+        warnings.append("short_scan_underconstrained")
+    baseline_x = np.asarray(baseline_fit.get("x", []), dtype=float)
+    baseline_x = baseline_x[np.isfinite(baseline_x)]
+    if baseline_x.size and (np.nanmin(x) < np.nanmin(baseline_x) or np.nanmax(x) > np.nanmax(baseline_x)):
+        warnings.append("short_scan_outside_baseline_range")
+
+    def objective(phi):
+        return rmse(y, sin_model(x, A, w, phi, b))
+
+    try:
+        opt = minimize_scalar(objective, bounds=(phi0 - np.pi, phi0 + np.pi), method="bounded")
+        if not opt.success:
+            raise RuntimeError(str(opt.message))
+        phi = wrap_to_pi(opt.x)
+        fitted = sin_model(x, A, w, phi, b)
+        rmse_value = rmse(y, fitted)
+        result = {
+            "A": A,
+            "w": w,
+            "phi": phi,
+            "b": b,
+            "rmse_uW": rmse_value,
+            "fit_mode": "short_fixed_wab_fit_phi_only",
+            "x": x,
+            "y": y,
+            "fitted": fitted,
+        }
+        fit = augment_fit_result(result, x, y, full_rmse_before=rmse_value, fit_warning=warnings)
+        normalized_rmse = fit_scalar(fit.get("normalized_rmse", np.nan))
+        if np.isfinite(normalized_rmse) and normalized_rmse > MAX_NORMALIZED_RMSE:
+            fit["fit_warning"] = append_warning(fit.get("fit_warning", ""), "short_scan_large_residual")
+        return fit
+    except Exception:
+        warnings.extend(["short_scan_fit_failed"])
+        result = {
+            "A": A,
+            "w": w,
+            "phi": phi0,
+            "b": b,
+            "rmse_uW": np.nan,
+            "fit_mode": "short_fixed_wab_fit_phi_only",
+            "x": x,
+            "y": y,
+            "fitted": np.full_like(y, np.nan, dtype=float),
+            "fit_success": False,
+            "fit_warning": join_warnings(warnings),
+        }
+        return augment_fit_result(result, x, y, full_rmse_before=np.nan)
+
+
+def empty_fit_fields(prefix, warning=""):
+    return {
+        f"{prefix}_A": np.nan,
+        f"{prefix}_w": np.nan,
+        f"{prefix}_phi": np.nan,
+        f"{prefix}_b": np.nan,
+        f"{prefix}_rmse_uW": np.nan,
+        f"{prefix}_visibility": np.nan,
+        f"{prefix}_fit_visibility": np.nan,
+        f"{prefix}_normalized_rmse": np.nan,
+        f"{prefix}_num_points": 0,
+        f"{prefix}_num_points_used": 0,
+        f"{prefix}_outlier_removed": False,
+        f"{prefix}_outlier_indices": "",
+        f"{prefix}_full_rmse_before_outlier_removal": np.nan,
+        f"{prefix}_fit_success": False,
+        f"{prefix}_fit_warning": join_warnings(warning),
+        f"{prefix}_fit_mode": "",
+    }
+
+
+def fit_fields(prefix, fit):
+    if not fit:
+        return empty_fit_fields(prefix, "fit_failed")
+    return {
+        f"{prefix}_A": fit_scalar(fit.get("A", np.nan)),
+        f"{prefix}_w": fit_scalar(fit.get("w", np.nan)),
+        f"{prefix}_phi": fit_scalar(fit.get("phi", np.nan)),
+        f"{prefix}_b": fit_scalar(fit.get("b", np.nan)),
+        f"{prefix}_rmse_uW": fit_scalar(fit.get("rmse_uW", np.nan)),
+        f"{prefix}_visibility": fit_scalar(fit.get("visibility", np.nan)),
+        f"{prefix}_fit_visibility": fit_scalar(fit.get("fit_visibility", np.nan)),
+        f"{prefix}_normalized_rmse": fit_scalar(fit.get("normalized_rmse", np.nan)),
+        f"{prefix}_num_points": int(fit.get("num_points", 0)),
+        f"{prefix}_num_points_used": int(fit.get("num_points_used", 0)),
+        f"{prefix}_outlier_removed": bool(fit.get("outlier_removed", False)),
+        f"{prefix}_outlier_indices": str(fit.get("outlier_indices_text", json.dumps(fit.get("outlier_indices", [])))),
+        f"{prefix}_full_rmse_before_outlier_removal": fit_scalar(
+            fit.get("full_rmse_before_outlier_removal", fit.get("full_rmse_before_outlier_removal_uW", np.nan))
+        ),
+        f"{prefix}_fit_success": bool(fit.get("fit_success", False)),
+        f"{prefix}_fit_warning": join_warnings(fit.get("fit_warning", "")),
+        f"{prefix}_fit_mode": str(fit.get("fit_mode", "")),
+    }
+
+
+def expected_w_warning(fit, expected_w):
+    if expected_w is None:
+        return ""
+    w = fit_scalar(fit.get("w", np.nan))
+    expected = fit_scalar(expected_w)
+    if np.isfinite(w) and np.isfinite(expected) and abs(w - expected) > MAX_W_DEVIATION:
+        return "fit_frequency_far_from_expected"
+    return ""
+
+
+def fit_quality_tokens(fit, expected_w=None):
+    tokens = []
+    if not fit or not bool(fit.get("fit_success", False)):
+        tokens.append("fit_failed")
+        for token in split_warning_tokens(fit.get("fit_warning", "") if fit else ""):
+            if token.startswith("short_scan_"):
+                tokens.append(token)
+        return tokens
+    visibility = fit_scalar(fit.get("visibility", np.nan))
+    normalized_rmse = fit_scalar(fit.get("normalized_rmse", np.nan))
+    amplitude = abs(fit_scalar(fit.get("A", np.nan)))
+    if np.isfinite(visibility) and visibility < MIN_VISIBILITY:
+        tokens.append("low_visibility")
+    if np.isfinite(normalized_rmse) and normalized_rmse > MAX_NORMALIZED_RMSE:
+        tokens.append("large_normalized_rmse")
+    if bool(fit.get("outlier_removed", False)):
+        tokens.append("outlier_removed")
+    if int(fit.get("num_points_used", 0)) < MIN_NUM_POINTS_USED:
+        tokens.append("not_enough_points")
+    if not np.isfinite(amplitude) or amplitude <= FIT_EPS:
+        tokens.append("amplitude_too_small")
+    w_warning = expected_w_warning(fit, expected_w)
+    if w_warning:
+        tokens.append(w_warning)
+    fit_warning_tokens = set(split_warning_tokens(fit.get("fit_warning", "")))
+    for token in sorted(fit_warning_tokens):
+        if token.startswith("short_scan_"):
+            tokens.append(token)
+    if "amplitude_too_small_for_normalized_rmse" in fit_warning_tokens:
+        tokens.append("amplitude_too_small")
+    if "visibility_denominator_near_zero" in fit_warning_tokens:
+        tokens.append("visibility_denominator_near_zero")
+    return tokens
+
+
+def pair_quality_warning(base_fit, pert_fit, phase_shift_rad, expected_w=None):
+    tokens = []
+    tokens.extend(fit_quality_tokens(base_fit, expected_w=expected_w))
+    tokens.extend(fit_quality_tokens(pert_fit, expected_w=expected_w))
+    phase_shift = fit_scalar(phase_shift_rad)
+    if np.isfinite(phase_shift) and abs(phase_shift) > MAX_ABS_PHASE_SHIFT_RAD:
+        tokens.append("large_phase_shift")
+    return join_warnings(tokens)
+
+
+def measurement_name(scan_kind, observed_mzi, perturbed_heater):
+    return f"{scan_kind}_obs{int(observed_mzi)}_perturb_{perturbed_heater}"
+
+
+def summarize_quality_details(delta_details_df, sigma_details_df):
+    def summarize_one(df, scan_kind):
+        total = int(len(df))
+        warnings_by_row = []
+        counts = {}
+        bad = []
+        remeasure = []
+        if not df.empty and "quality_warning" in df.columns:
+            for row in df.to_dict(orient="records"):
+                tokens = split_warning_tokens(row.get("quality_warning", ""))
+                warnings_by_row.append(tokens)
+                for token in tokens:
+                    counts[token] = counts.get(token, 0) + 1
+                if tokens:
+                    name = measurement_name(scan_kind, row.get("observed_mzi", -1), row.get("perturbed_heater", "unknown"))
+                    bad.append(name)
+                    if REMEASURE_WARNING_TOKENS.intersection(tokens):
+                        remeasure.append(name)
+        return {
+            "total_measurements": total,
+            "measurements_with_warning": int(sum(1 for tokens in warnings_by_row if tokens)),
+            "warning_counts": dict(sorted(counts.items())),
+        }, bad, remeasure
+
+    delta_summary, delta_bad, delta_remeasure = summarize_one(delta_details_df, "delta")
+    sigma_summary, sigma_bad, sigma_remeasure = summarize_one(sigma_details_df, "sigma")
+    bad_measurements = list(dict.fromkeys([*delta_bad, *sigma_bad]))
+    recommended = list(dict.fromkeys([*delta_remeasure, *sigma_remeasure]))
+    return {
+        "delta": delta_summary,
+        "sigma_link": sigma_summary,
+        "bad_measurements": bad_measurements,
+        "recommended_remeasure_list": recommended,
+        "thresholds": {
+            "MAX_NORMALIZED_RMSE": MAX_NORMALIZED_RMSE,
+            "MIN_VISIBILITY": MIN_VISIBILITY,
+            "MAX_ABS_PHASE_SHIFT_RAD": MAX_ABS_PHASE_SHIFT_RAD,
+            "MAX_W_DEVIATION": MAX_W_DEVIATION,
+            "MIN_NUM_POINTS_USED": MIN_NUM_POINTS_USED,
+        },
+    }
 
 
 def _read_delta_power(metadata_path):
@@ -552,7 +1068,7 @@ def _read_delta_power(metadata_path):
 
 
 def _missing_detail_row(observed_mzi, probe_arm, perturbed_heater, delta_power_w, warning):
-    return {
+    row = {
         "observed_mzi": observed_mzi,
         "probe_arm": probe_arm,
         "perturbed_heater": perturbed_heater,
@@ -578,6 +1094,17 @@ def _missing_detail_row(observed_mzi, probe_arm, perturbed_heater, delta_power_w
         "baseline_scan_port": "",
         "perturbed_scan_port": "",
     }
+    row.update(empty_fit_fields("base", warning))
+    row.update(empty_fit_fields("pert", warning))
+    row.update(
+        {
+            "abs_delta_eta_rad": np.nan,
+            "j_delta_rad_per_w": np.nan,
+            "j_delta_rad_per_mw": np.nan,
+            "quality_warning": "fit_failed",
+        }
+    )
+    return row
 
 
 def _detail_row_from_result(observed_mzi, probe_arm, perturbed_heater, delta_power_w, init_params, result):
@@ -586,7 +1113,14 @@ def _detail_row_from_result(observed_mzi, probe_arm, perturbed_heater, delta_pow
     j_rad_per_w = result["delta_delta_rad"] / delta_power_w
     baseline_meta = result["baseline_scan"]["metadata"]
     perturbed_meta = result["perturbed_scan"]["metadata"]
-    return {
+    expected_w = init_params["w"]
+    quality_warning = pair_quality_warning(
+        baseline_fit,
+        perturbed_fit,
+        result["delta_eta_rad"],
+        expected_w=expected_w,
+    )
+    row = {
         "observed_mzi": observed_mzi,
         "probe_arm": probe_arm,
         "perturbed_heater": perturbed_heater,
@@ -594,9 +1128,12 @@ def _detail_row_from_result(observed_mzi, probe_arm, perturbed_heater, delta_pow
         "baseline_phi": baseline_fit["phi"],
         "perturbed_phi": perturbed_fit["phi"],
         "delta_eta_rad": result["delta_eta_rad"],
+        "abs_delta_eta_rad": abs(result["delta_eta_rad"]),
         "delta_delta_rad": result["delta_delta_rad"],
         "J_rad_per_w": j_rad_per_w,
         "J_rad_per_mw": j_rad_per_w / 1000.0,
+        "j_delta_rad_per_w": j_rad_per_w,
+        "j_delta_rad_per_mw": j_rad_per_w / 1000.0,
         "baseline_rmse_uW": baseline_fit["rmse_uW"],
         "perturbed_rmse_uW": perturbed_fit["rmse_uW"],
         "baseline_A": baseline_fit["A"],
@@ -611,7 +1148,11 @@ def _detail_row_from_result(observed_mzi, probe_arm, perturbed_heater, delta_pow
         "perturbed_scan_arm_name": perturbed_meta.get("arm_name", ""),
         "baseline_scan_port": baseline_meta.get("port", ""),
         "perturbed_scan_port": perturbed_meta.get("port", ""),
+        "quality_warning": quality_warning,
     }
+    row.update(fit_fields("base", baseline_fit))
+    row.update(fit_fields("pert", perturbed_fit))
+    return row
 
 
 def write_calibration_summary(mzi_table, out_dir, probe_map):
@@ -725,6 +1266,7 @@ def compute_j_delta(mzi_table_path, jacobian_dir, out_dir, probe_map, fix_w=True
                     probe_arm,
                     perturbed_heater,
                     fit_fig_dir / f"obs{observed_mzi}_perturb_{perturbed_heater}.png",
+                    quality_warning=detail.get("quality_warning", ""),
                 )
             except Exception as exc:
                 warning = f"fit failed: {exc}"
@@ -794,91 +1336,146 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
                 delta_eta = wrap_to_pi(pert_fit["phi"] - base_fit["phi"])
                 delta_delta = delta_eta if probe_arm == "u" else -delta_eta
                 j_value = delta_delta / delta_power_w
+                expected_w = get_fit_params(mzi_table, int(mzi_id), probe_arm)["w"]
+                quality_warning = pair_quality_warning(base_fit, pert_fit, delta_eta, expected_w=expected_w)
                 j_delta.loc[f"Delta{int(mzi_id)}", col] = j_value
-                delta_details.append(
-                    {
-                        "observed_mzi": int(mzi_id),
-                        "probe_arm": probe_arm,
-                        "perturbed_heater": heater,
-                        "delta_power_w": delta_power_w,
-                        "eta_base": base_fit["phi"],
-                        "eta_pert": pert_fit["phi"],
-                        "delta_eta_rad": delta_eta,
-                        "delta_delta_rad": delta_delta,
-                        "J_delta_rad_per_w": j_value,
-                        "baseline_rmse_uW": base_fit["rmse_uW"],
-                        "perturbed_rmse_uW": pert_fit["rmse_uW"],
-                        "baseline_outlier_removed": bool(base_fit.get("outlier_removed", False)),
-                        "baseline_excluded_index": base_fit.get("excluded_index", ""),
-                        "baseline_full_rmse_before_outlier_removal_uW": base_fit.get("full_rmse_before_outlier_removal_uW", ""),
-                        "perturbed_outlier_removed": bool(pert_fit.get("outlier_removed", False)),
-                        "perturbed_excluded_index": pert_fit.get("excluded_index", ""),
-                        "perturbed_full_rmse_before_outlier_removal_uW": pert_fit.get("full_rmse_before_outlier_removal_uW", ""),
-                        "warning": "abs(delta_eta)>pi/2" if abs(delta_eta) > np.pi / 2 else "",
-                    }
-                )
+                delta_row = {
+                    "observed_mzi": int(mzi_id),
+                    "probe_arm": probe_arm,
+                    "perturbed_heater": heater,
+                    "delta_power_w": delta_power_w,
+                    "eta_base": base_fit["phi"],
+                    "eta_pert": pert_fit["phi"],
+                    "delta_eta_rad": delta_eta,
+                    "abs_delta_eta_rad": abs(delta_eta),
+                    "delta_delta_rad": delta_delta,
+                    "J_delta_rad_per_w": j_value,
+                    "J_delta_rad_per_mw": j_value / 1000.0,
+                    "j_delta_rad_per_w": j_value,
+                    "j_delta_rad_per_mw": j_value / 1000.0,
+                    "baseline_rmse_uW": base_fit["rmse_uW"],
+                    "perturbed_rmse_uW": pert_fit["rmse_uW"],
+                    "baseline_A": base_fit["A"],
+                    "baseline_b": base_fit["b"],
+                    "perturbed_A": pert_fit["A"],
+                    "perturbed_b": pert_fit["b"],
+                    "baseline_outlier_removed": bool(base_fit.get("outlier_removed", False)),
+                    "baseline_excluded_index": base_fit.get("excluded_index", ""),
+                    "baseline_full_rmse_before_outlier_removal_uW": base_fit.get("full_rmse_before_outlier_removal_uW", ""),
+                    "perturbed_outlier_removed": bool(pert_fit.get("outlier_removed", False)),
+                    "perturbed_excluded_index": pert_fit.get("excluded_index", ""),
+                    "perturbed_full_rmse_before_outlier_removal_uW": pert_fit.get("full_rmse_before_outlier_removal_uW", ""),
+                    "warning": "large_phase_shift" if abs(delta_eta) > np.pi / 2 else "",
+                    "quality_warning": quality_warning,
+                }
+                delta_row.update(fit_fields("base", base_fit))
+                delta_row.update(fit_fields("pert", pert_fit))
+                delta_details.append(delta_row)
                 plot_fit_comparison(
                     jacobian_dir / "baseline" / "delta" / f"obs{int(mzi_id)}_probe.txt",
                     perturb_dir / "delta" / f"obs{int(mzi_id)}_probe.txt",
-                    {"power_w": base_fit["x"], "optical_power_uW": base_fit["y"], "A": base_fit["A"], "w": base_fit["w"], "phi": base_fit["phi"], "b": base_fit["b"], "excluded_x": base_fit.get("excluded_x", []), "excluded_y": base_fit.get("excluded_y", [])},
-                    {"power_w": pert_fit["x"], "optical_power_uW": pert_fit["y"], "A": pert_fit["A"], "w": pert_fit["w"], "phi": pert_fit["phi"], "b": pert_fit["b"], "excluded_x": pert_fit.get("excluded_x", []), "excluded_y": pert_fit.get("excluded_y", [])},
+                    base_fit,
+                    pert_fit,
                     int(mzi_id),
                     probe_arm,
                     heater,
                     fit_dir / f"delta_obs{int(mzi_id)}_perturb_{heater}.png",
+                    quality_warning=quality_warning,
                 )
             except Exception as exc:
                 warning = f"delta obs{mzi_id} perturb {heater}: {exc}"
                 warnings.append(warning)
-                delta_details.append({"observed_mzi": int(mzi_id), "probe_arm": probe_arm, "perturbed_heater": heater, "delta_power_w": delta_power_w, "warning": warning})
+                delta_row = {
+                    "observed_mzi": int(mzi_id),
+                    "probe_arm": probe_arm,
+                    "perturbed_heater": heater,
+                    "delta_power_w": delta_power_w,
+                    "warning": warning,
+                    "quality_warning": "fit_failed",
+                }
+                delta_row.update(empty_fit_fields("base", warning))
+                delta_row.update(empty_fit_fields("pert", warning))
+                delta_details.append(delta_row)
             try:
                 pert_sigma_scan = load_generic_scan(perturb_dir / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt", ("dp",))
                 base_fit = baseline_sigma_fits[int(mzi_id)]
-                pert_fit = fit_sine_free_or_fixed(pert_sigma_scan["x"], pert_sigma_scan["y"], fix_w=base_fit["w"] if fix_w else None, init_params=base_fit, remove_one_outlier=True)
+                sigma_mode = scan_sigma_mode(pert_sigma_scan)
+                if sigma_mode == "short":
+                    pert_fit = fit_sigma_short_phi_only(pert_sigma_scan["x"], pert_sigma_scan["y"], base_fit)
+                else:
+                    pert_fit = fit_sine_free_or_fixed(pert_sigma_scan["x"], pert_sigma_scan["y"], fix_w=base_fit["w"] if fix_w else None, init_params=base_fit, remove_one_outlier=True)
                 delta_beta = wrap_to_pi(pert_fit["phi"] - base_fit["phi"])
-                sigma_coeff = 2.0
+                sigma_coeff = SIGMA_COEFF
                 relative_link = sigma_coeff * delta_beta
                 j_link_value = relative_link / delta_power_w
+                quality_warning = pair_quality_warning(base_fit, pert_fit, delta_beta, expected_w=1.0)
                 j_sigma_link.loc[f"Sigma{int(mzi_id)}", col] = j_link_value
-                sigma_details.append(
-                    {
-                        "observed_mzi": int(mzi_id),
-                        "bmzi": int(sigma_bmzi_map.get(str(int(mzi_id)), 0)),
-                        "perturbed_heater": heater,
-                        "delta_power_w": delta_power_w,
-                        "beta_base": base_fit["phi"],
-                        "beta_pert": pert_fit["phi"],
-                        "delta_beta": delta_beta,
-                        "sigma_coeff": sigma_coeff,
-                        "relative_sigma_link_rad": relative_link,
-                        "J_sigma_link_rad_per_w": j_link_value,
-                        "baseline_rmse_uW": base_fit["rmse_uW"],
-                        "perturbed_rmse_uW": pert_fit["rmse_uW"],
-                        "baseline_outlier_removed": bool(base_fit.get("outlier_removed", False)),
-                        "baseline_excluded_index": base_fit.get("excluded_index", ""),
-                        "baseline_full_rmse_before_outlier_removal_uW": base_fit.get("full_rmse_before_outlier_removal_uW", ""),
-                        "perturbed_outlier_removed": bool(pert_fit.get("outlier_removed", False)),
-                        "perturbed_excluded_index": pert_fit.get("excluded_index", ""),
-                        "perturbed_full_rmse_before_outlier_removal_uW": pert_fit.get("full_rmse_before_outlier_removal_uW", ""),
-                        "warning": "sigma_coeff default +2",
-                    }
-                )
+                sigma_row = {
+                    "observed_mzi": int(mzi_id),
+                    "bmzi": int(sigma_bmzi_map.get(str(int(mzi_id)), 0)),
+                    "perturbed_heater": heater,
+                    "delta_power_w": delta_power_w,
+                    "sigma_scan_mode": sigma_mode,
+                    "fit_mode": str(pert_fit.get("fit_mode", "")),
+                    "beta_base": base_fit["phi"],
+                    "beta_pert": pert_fit["phi"],
+                    "delta_beta": delta_beta,
+                    "delta_beta_rad": delta_beta,
+                    "abs_delta_beta_rad": abs(delta_beta),
+                    "sigma_coeff": sigma_coeff,
+                    "relative_sigma_link_rad": relative_link,
+                    "J_sigma_link_rad_per_w": j_link_value,
+                    "J_sigma_link_rad_per_mw": j_link_value / 1000.0,
+                    "j_sigma_link_rad_per_w": j_link_value,
+                    "j_sigma_link_rad_per_mw": j_link_value / 1000.0,
+                    "baseline_rmse_uW": base_fit["rmse_uW"],
+                    "perturbed_rmse_uW": pert_fit["rmse_uW"],
+                    "baseline_A": base_fit["A"],
+                    "baseline_b": base_fit["b"],
+                    "perturbed_A": pert_fit["A"],
+                    "perturbed_b": pert_fit["b"],
+                    "baseline_outlier_removed": bool(base_fit.get("outlier_removed", False)),
+                    "baseline_excluded_index": base_fit.get("excluded_index", ""),
+                    "baseline_full_rmse_before_outlier_removal_uW": base_fit.get("full_rmse_before_outlier_removal_uW", ""),
+                    "perturbed_outlier_removed": bool(pert_fit.get("outlier_removed", False)),
+                    "perturbed_excluded_index": pert_fit.get("excluded_index", ""),
+                    "perturbed_full_rmse_before_outlier_removal_uW": pert_fit.get("full_rmse_before_outlier_removal_uW", ""),
+                    "warning": "sigma_coeff default +2",
+                    "quality_warning": quality_warning,
+                }
+                sigma_row.update(fit_fields("base", base_fit))
+                sigma_row.update(fit_fields("pert", pert_fit))
+                sigma_details.append(sigma_row)
                 plot_fit_comparison(
                     jacobian_dir / "baseline" / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt",
                     perturb_dir / "sigma" / f"obs{int(mzi_id)}_inter_scan.txt",
-                    {"power_w": base_fit["x"], "optical_power_uW": base_fit["y"], "A": base_fit["A"], "w": base_fit["w"], "phi": base_fit["phi"], "b": base_fit["b"], "excluded_x": base_fit.get("excluded_x", []), "excluded_y": base_fit.get("excluded_y", [])},
-                    {"power_w": pert_fit["x"], "optical_power_uW": pert_fit["y"], "A": pert_fit["A"], "w": pert_fit["w"], "phi": pert_fit["phi"], "b": pert_fit["b"], "excluded_x": pert_fit.get("excluded_x", []), "excluded_y": pert_fit.get("excluded_y", [])},
+                    base_fit,
+                    pert_fit,
                     int(mzi_id),
                     "sigma",
                     heater,
                     fit_dir / f"sigma_obs{int(mzi_id)}_perturb_{heater}.png",
+                    quality_warning=quality_warning,
                 )
             except Exception as exc:
                 warning = f"sigma obs{mzi_id} perturb {heater}: {exc}"
                 warnings.append(warning)
-                sigma_details.append({"observed_mzi": int(mzi_id), "bmzi": int(sigma_bmzi_map.get(str(int(mzi_id)), 0)), "perturbed_heater": heater, "delta_power_w": delta_power_w, "warning": warning})
+                sigma_row = {
+                    "observed_mzi": int(mzi_id),
+                    "bmzi": int(sigma_bmzi_map.get(str(int(mzi_id)), 0)),
+                    "perturbed_heater": heater,
+                    "delta_power_w": delta_power_w,
+                    "sigma_scan_mode": "unknown",
+                    "fit_mode": "",
+                    "warning": warning,
+                    "quality_warning": "fit_failed",
+                }
+                sigma_row.update(empty_fit_fields("base", warning))
+                sigma_row.update(empty_fit_fields("pert", warning))
+                sigma_details.append(sigma_row)
 
     j_sigma_global, chain_order, chain_valid = compute_global_sigma_matrix(j_sigma_link, sigma_bmzi_map, mzi_ids, sigma_reference_mode)
+    delta_details_df = pd.DataFrame(delta_details)
     sigma_details_df = pd.DataFrame(sigma_details)
     if not sigma_details_df.empty:
         for heater in heaters:
@@ -924,18 +1521,23 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
     (j_lower / 1000.0).to_csv(out_dir / "J_lower_rad_per_mw.csv")
     j_theta.to_csv(out_dir / "J_theta_rad_per_w.csv")
     (j_theta / 1000.0).to_csv(out_dir / "J_theta_rad_per_mw.csv")
-    pd.DataFrame(delta_details).to_csv(out_dir / "delta_phase_shift_details.csv", index=False)
+    delta_details_df.to_csv(out_dir / "delta_phase_shift_details.csv", index=False)
     sigma_details_df.to_csv(out_dir / "sigma_link_phase_shift_details.csv", index=False)
     plot_matrix_heatmap((j_delta / 1000.0).to_numpy(dtype=float), list(j_delta.index), cols, heatmap_dir / "J_delta_heatmap.png", "J_delta (rad/mW)")
     plot_matrix_heatmap((j_sigma_link / 1000.0).to_numpy(dtype=float), list(j_sigma_link.index), cols, heatmap_dir / "J_sigma_link_heatmap.png", "J_sigma_link (rad/mW)")
     plot_matrix_heatmap((j_sigma_global / 1000.0).to_numpy(dtype=float), list(j_sigma_global.index), cols, heatmap_dir / "J_sigma_global_heatmap.png", "J_sigma_global (rad/mW)")
     plot_matrix_heatmap((j_theta / 1000.0).to_numpy(dtype=float), list(j_theta.index), cols, heatmap_dir / "J_theta_heatmap.png", "J_theta (rad/mW)")
+    quality_summary = summarize_quality_details(delta_details_df, sigma_details_df)
     summary = {
         "mzi_ids": [int(v) for v in mzi_ids],
         "heater_order": list(heaters),
         "probe_map": {str(k): v for k, v in probe_map.items()},
         "sigma_reference_mode": sigma_reference_mode,
         "sigma_bmzi_map": sigma_bmzi_map,
+        "formula_sigma_link": "relative_sigma_link_rad = delta_Sigma_i - delta_Sigma_bmzi = 2.0 * delta_beta_rad",
+        "formula_sigma_global": "Sigma_5_global = Sigma_5 - Sigma_0; Sigma_6_global = (Sigma_6 - Sigma_5) + Sigma_5_global; Sigma_7_global = (Sigma_7 - Sigma_6) + Sigma_6_global; Sigma_8_global = (Sigma_8 - Sigma_7) + Sigma_7_global",
+        "sigma_theory_note": sigma_theory_note(),
+        "sigma_coeff": SIGMA_COEFF,
         "mzi_table_path": str(resolve_default_mzi_table(mzi_table_path)),
         "sigma_chain_order": chain_order,
         "sigma_chain_valid": bool(chain_valid),
@@ -947,6 +1549,9 @@ def compute_all(jacobian_dir, out_dir, mzi_ids, heaters, probe_map, sigma_bmzi_m
         "relative_sigma_link_definition": "sigma inter scan measures delta_Sigma_i - delta_Sigma_bmzi",
         "J_theta_definition": "J_u=(J_sigma_global+J_delta)/2, J_d=(J_sigma_global-J_delta)/2",
         "J_delta_fit_definition": "delta probe fits use fixed heater phase frequency from MZI_table when fix_w=true",
+        "quality_summary": quality_summary,
+        "bad_measurements": quality_summary["bad_measurements"],
+        "recommended_remeasure_list": quality_summary["recommended_remeasure_list"],
         "warnings": warnings,
     }
     with (out_dir / "J_compute_summary.json").open("w", encoding="utf-8") as f:
