@@ -1,0 +1,19 @@
+{
+  "mode": "iterate",
+  "dry_run": false,
+  "confirm_hardware": true,
+  "j_theta": "results\\J_remeasure_current\\J_theta_rad_per_w.csv",
+  "mzi_table": "Scandata\\MZI_table.json",
+  "current_power": "current_power_second_column.csv",
+  "reference_dir": "Scandata\\current_theta_reference",
+  "current_dir": "Scandata\\current_theta_measurement",
+  "alpha": 0.3,
+  "lambda_reg": 0.0001,
+  "step_limit_w": 0.002,
+  "power_limit_w": 0.055,
+  "voltage_limit_v": 6.0,
+  "max_iter": 1,
+  "scan_profile": "fast",
+  "theta_update_mode": "measured_auto",
+  "initial_state": "voltage_pair"
+}

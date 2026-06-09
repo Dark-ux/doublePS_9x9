@@ -65,7 +65,6 @@
       "total_measurements": 32,
       "measurements_with_warning": 21,
       "warning_counts": {
-        "large_phase_shift": 1,
         "low_visibility": 17,
         "outlier_removed": 7
       }

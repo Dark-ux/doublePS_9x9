@@ -1,0 +1,68 @@
+{
+  "iter": 0,
+  "stopped_by_measurement_quality": true,
+  "failure_reason": "current_theta_summary allow_hardware_update=false",
+  "failed_mzi_ids": [],
+  "outlier_mzi_ids": [],
+  "outlier_scan_types": [],
+  "prediction_inconsistent_mzi_ids": [],
+  "prediction_inconsistent_parts": [],
+  "current_theta_measurement_dir": "results\\ColumnPhaseOptimize\\run_20260609_142228\\iter_000\\current_theta_measurement",
+  "suggested_action": [
+    "rescan failed MZI",
+    "run diagnose_theta_measurement",
+    "reduce step size",
+    "check sigma path visibility"
+  ],
+  "current_theta_summary": {
+    "max_abs_theta": 1.3454414217105564,
+    "mzi_ids": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "reference_dir": "Scandata\\current_theta_reference",
+    "current_dir": "results\\ColumnPhaseOptimize\\run_20260609_142228\\iter_000\\current_theta_measurement",
+    "valid_theta_count": 8,
+    "failed_mzi_ids": [],
+    "low_visibility_mzi_ids": [
+      6,
+      7,
+      8
+    ],
+    "phase_jump_mzi_ids": [
+      8
+    ],
+    "scan_quality_ok": true,
+    "outlier_mzi_ids": [],
+    "outlier_scan_types": [],
+    "sigma_reference_mode": "chained_bmzi",
+    "sigma_bmzi_map": {
+      "5": 0,
+      "6": 5,
+      "7": 6,
+      "8": 7
+    },
+    "sigma_chain_order": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "sigma_chain_valid": true,
+    "prediction_consistency_ok": null,
+    "prediction_inconsistent_mzi_ids": [],
+    "prediction_inconsistent_parts": [],
+    "delta_Sigma_definition": "global delta Sigma relative to top straight waveguide, reconstructed from relative sigma links",
+    "relative_sigma_link_definition": "sigma phase difference measured by inter scan relative to bmzi",
+    "strict_phase_jump": false,
+    "visibility_threshold": 0.3,
+    "allow_hardware_update": false,
+    "warnings": [
+      "MZI 6: Delta low visibility",
+      "MZI 7: Sigma low visibility",
+      "MZI 8: Delta phase jump may be too large; Sigma low visibility"
+    ]
+  }
+}
