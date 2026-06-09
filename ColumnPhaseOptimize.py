@@ -2492,6 +2492,68 @@ def read_current_power_from_working_data(file_data, heater_info):
     return voltage_to_power(np.array(voltages), heater_info["resistances"])
 
 
+def read_all_currents_retry(cu, mcv, retries=5, delay_s=0.2):
+    currents = None
+    none_count = None
+    attempts = max(1, int(retries))
+    for attempt in range(1, attempts + 1):
+        try:
+            currents = cu.read_current(mcv)
+        except Exception as exc:
+            if attempt == attempts:
+                return [], attempt, f"read_current_failed: {exc}"
+            time.sleep(float(delay_s))
+            continue
+        none_count = sum(value is None for value in currents)
+        if none_count == 0:
+            return currents, attempt, ""
+        if attempt < attempts:
+            time.sleep(float(delay_s))
+    return currents or [], attempts, f"current_read_has_none_count={none_count}"
+
+
+def append_heater_update_snapshot(run_dir, iteration, phase, working_data, heater_labels, heater_info, cu, mcv):
+    currents, current_read_attempts, current_read_warning = read_all_currents_retry(cu, mcv)
+    timestamp = datetime.now().isoformat(timespec="microseconds")
+    second_column_by_port = {}
+    for heater, port, resistance in zip(heater_labels, heater_info["ports"], heater_info["resistances"]):
+        second_column_by_port[int(port)] = {
+            "second_column_heater": str(heater),
+            "second_column_resistance_ohm": float(resistance),
+        }
+    channel_count = int(getattr(cu, "CHANNEL_NUM", len(working_data)))
+    rows = []
+    for port in range(1, channel_count + 1):
+        voltage_v = get_port_voltage(working_data, port)
+        current_value = currents[port - 1] if currents and port - 1 < len(currents) else None
+        second_column = second_column_by_port.get(port, {})
+        resistance = second_column.get("second_column_resistance_ohm")
+        power_w = "" if resistance is None else float(voltage_to_power(voltage_v, float(resistance)))
+        rows.append(
+            {
+                "timestamp": timestamp,
+                "iter": int(iteration),
+                "phase": str(phase),
+                "port": port,
+                "voltage_v": float(voltage_v),
+                "current_reading": "" if current_value is None else float(current_value),
+                "current_read_attempts": int(current_read_attempts),
+                "current_read_warning": current_read_warning,
+                "second_column_heater": second_column.get("second_column_heater", ""),
+                "second_column_resistance_ohm": "" if resistance is None else float(resistance),
+                "second_column_power_w": power_w,
+            }
+        )
+    out_path = Path(run_dir) / "heater_update_snapshots.csv"
+    pd.DataFrame(rows).to_csv(
+        out_path,
+        mode="a",
+        header=not out_path.exists(),
+        index=False,
+        float_format="%.12f",
+    )
+
+
 def apply_power_vector_to_working_data(working_data, heater_info, powers_w, write_port_voltage):
     powers = np.asarray(powers_w, dtype=float)
     for port, resistance, power_w in zip(heater_info["ports"], heater_info["resistances"], powers):
@@ -3516,6 +3578,16 @@ def iterate(args):
         theta_before_update = np.array(theta, dtype=float, copy=True)
         delta_P_applied = np.asarray(plan["P_next"] - P, dtype=float)
         if not args.dry_run:
+            append_heater_update_snapshot(
+                run_dir,
+                k,
+                "before_update_upload",
+                working_data,
+                heater_labels,
+                heater_info,
+                hardware["cu"],
+                hardware["mcv"],
+            )
             upload_second_column_voltages(
                 working_data,
                 update_df,
@@ -3525,9 +3597,29 @@ def iterate(args):
                 args.voltage_limit_v,
                 context_label=f"iteration {k + 1}/{args.max_iter}: optimization update",
             )
+            append_heater_update_snapshot(
+                run_dir,
+                k,
+                "after_update_upload",
+                working_data,
+                heater_labels,
+                heater_info,
+                hardware["cu"],
+                hardware["mcv"],
+            )
             import time
 
             time.sleep(args.settle_time)
+            append_heater_update_snapshot(
+                run_dir,
+                k,
+                "after_update_settle",
+                working_data,
+                heater_labels,
+                heater_info,
+                hardware["cu"],
+                hardware["mcv"],
+            )
             ref_ready = bool(args.reference_dir) and (Path(args.reference_dir) / "theta_reference.json").exists()
             theta_update_mode = getattr(args, "theta_update_mode", "measured_manual")
             if theta_update_mode == "measured_manual":
