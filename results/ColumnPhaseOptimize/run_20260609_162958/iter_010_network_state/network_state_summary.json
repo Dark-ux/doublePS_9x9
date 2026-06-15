@@ -1,0 +1,86 @@
+{
+  "run_dir": "results\\ColumnPhaseOptimize\\run_20260609_162958",
+  "iteration": 10,
+  "state_definition": "iter_010_theta/power are the state evaluated at the start of iteration 10; iter_010_measured_theta is after applying iteration 10 update.",
+  "max_abs_theta_error_start_rad": 0.763952525594719,
+  "norm_theta_error_start": 1.4746791650379327,
+  "model_output_rmse_start": 0.11345094760744509,
+  "model_output_mae_start": 0.050939973039357614,
+  "model_output_max_abs_start": 0.32506809029038763,
+  "scan_quality_ok": true,
+  "allow_hardware_update": true,
+  "prediction_consistency_ok": true,
+  "warnings": "[\"MZI 8: Delta phase jump may be too large\"]",
+  "theta_worst_start": [
+    {
+      "theta": "theta8u",
+      "target_rad": 3.141592653589793,
+      "iter010_start_theta_rad": 2.377640127995074,
+      "iter010_start_error_rad_target_minus_current": 0.763952525594719,
+      "abs_start_error_rad": 0.763952525594719,
+      "iter010_after_update_measured_theta_rad": 2.142804672637085,
+      "iter010_after_update_error_rad_target_minus_current": 0.9987879809527076,
+      "abs_after_update_error_rad": 0.9987879809527076
+    },
+    {
+      "theta": "theta5u",
+      "target_rad": 1.0471975511965976,
+      "iter010_start_theta_rad": 0.3981589383189838,
+      "iter010_start_error_rad_target_minus_current": 0.6490386128776136,
+      "abs_start_error_rad": 0.6490386128776136,
+      "iter010_after_update_measured_theta_rad": 0.241875844507911,
+      "iter010_after_update_error_rad_target_minus_current": 0.8053217066886864,
+      "abs_after_update_error_rad": 0.8053217066886864
+    },
+    {
+      "theta": "theta6u",
+      "target_rad": 1.0471975511965976,
+      "iter010_start_theta_rad": 0.4571982912439205,
+      "iter010_start_error_rad_target_minus_current": 0.5899992599526769,
+      "abs_start_error_rad": 0.5899992599526769,
+      "iter010_after_update_measured_theta_rad": 0.1432651670461799,
+      "iter010_after_update_error_rad_target_minus_current": 0.9039323841504174,
+      "abs_after_update_error_rad": 0.9039323841504174
+    }
+  ],
+  "max_output_error_location": {
+    "row": "7",
+    "column": "7",
+    "error": -0.3250680902903876,
+    "abs_error": 0.3250680902903876
+  },
+  "max_abs_theta_error_after_update_rad": 0.9987879809527076,
+  "norm_theta_error_after_update": 1.7058698268582562,
+  "theta_worst_after_update": [
+    {
+      "theta": "theta8u",
+      "target_rad": 3.141592653589793,
+      "iter010_start_theta_rad": 2.377640127995074,
+      "iter010_start_error_rad_target_minus_current": 0.763952525594719,
+      "abs_start_error_rad": 0.763952525594719,
+      "iter010_after_update_measured_theta_rad": 2.142804672637085,
+      "iter010_after_update_error_rad_target_minus_current": 0.9987879809527076,
+      "abs_after_update_error_rad": 0.9987879809527076
+    },
+    {
+      "theta": "theta6u",
+      "target_rad": 1.0471975511965976,
+      "iter010_start_theta_rad": 0.4571982912439205,
+      "iter010_start_error_rad_target_minus_current": 0.5899992599526769,
+      "abs_start_error_rad": 0.5899992599526769,
+      "iter010_after_update_measured_theta_rad": 0.1432651670461799,
+      "iter010_after_update_error_rad_target_minus_current": 0.9039323841504174,
+      "abs_after_update_error_rad": 0.9039323841504174
+    },
+    {
+      "theta": "theta5u",
+      "target_rad": 1.0471975511965976,
+      "iter010_start_theta_rad": 0.3981589383189838,
+      "iter010_start_error_rad_target_minus_current": 0.6490386128776136,
+      "abs_start_error_rad": 0.6490386128776136,
+      "iter010_after_update_measured_theta_rad": 0.241875844507911,
+      "iter010_after_update_error_rad_target_minus_current": 0.8053217066886864,
+      "abs_after_update_error_rad": 0.8053217066886864
+    }
+  ]
+}

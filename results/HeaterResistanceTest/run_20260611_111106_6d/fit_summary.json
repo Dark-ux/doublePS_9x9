@@ -1,0 +1,23 @@
+{
+  "target_heater": "6d",
+  "target_port": 8,
+  "target_reference_resistance_ohm": 514.6538964400621,
+  "others_0v": {
+    "slope_a_per_v": 1.85595706274818,
+    "intercept_a": 0.16109975475984326,
+    "r2": 0.9991047375360578,
+    "resistance_ohm_from_slope": 0.5388055683353284,
+    "point_count": 56
+  },
+  "others_3v": {
+    "slope_a_per_v": 1.8609479708815277,
+    "intercept_a": -0.0065029481583483255,
+    "r2": 0.9991373392571623,
+    "resistance_ohm_from_slope": 0.5373605364830817,
+    "point_count": 56
+  },
+  "bias_minus_zero": {
+    "slope_delta_a_per_v": 0.004990908133347682,
+    "intercept_delta_a": -0.16760270291819157
+  }
+}

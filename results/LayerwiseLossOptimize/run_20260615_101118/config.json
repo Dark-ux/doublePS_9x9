@@ -1,0 +1,86 @@
+{
+  "N": 9,
+  "layer": 2,
+  "target_thetas": "target_thetas.npy",
+  "mzi_table": "Scandata\\MZI_table.json",
+  "inter_cali_pairs": "Scandata\\inter_cali_pairs.json",
+  "bw_dir": "Scandata\\BW",
+  "out_dir": "results\\LayerwiseLossOptimize",
+  "v_min": 0.0,
+  "v_max": 5.5,
+  "delta_v": 0.02,
+  "lr": 0.1,
+  "max_step_v": 0.1,
+  "max_iter": 10,
+  "loss_tol": 0.0001,
+  "settle_time": 0.5,
+  "dry_run": false,
+  "confirm_hardware": true,
+  "show_figure": false,
+  "init_mode": "bar",
+  "init_voltage_file": null,
+  "line_search": true,
+  "line_search_shrink": 0.5,
+  "line_search_min_lr": 0.001,
+  "ser_address": "COM3",
+  "opm2_address": "TCPIP0::192.168.0.7::inst0::INSTR",
+  "layer_index": 1,
+  "output_count": 8,
+  "layer_index_0based": 1,
+  "active_mzi_ids": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "active_heaters": [
+    {
+      "mzi_id": 5,
+      "arm_index": 0,
+      "port": 11,
+      "label": "MZI5_arm0"
+    },
+    {
+      "mzi_id": 5,
+      "arm_index": 1,
+      "port": 7,
+      "label": "MZI5_arm1"
+    },
+    {
+      "mzi_id": 6,
+      "arm_index": 0,
+      "port": 12,
+      "label": "MZI6_arm0"
+    },
+    {
+      "mzi_id": 6,
+      "arm_index": 1,
+      "port": 8,
+      "label": "MZI6_arm1"
+    },
+    {
+      "mzi_id": 7,
+      "arm_index": 0,
+      "port": 13,
+      "label": "MZI7_arm0"
+    },
+    {
+      "mzi_id": 7,
+      "arm_index": 1,
+      "port": 9,
+      "label": "MZI7_arm1"
+    },
+    {
+      "mzi_id": 8,
+      "arm_index": 0,
+      "port": 14,
+      "label": "MZI8_arm0"
+    },
+    {
+      "mzi_id": 8,
+      "arm_index": 1,
+      "port": 10,
+      "label": "MZI8_arm1"
+    }
+  ]
+}
