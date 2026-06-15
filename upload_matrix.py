@@ -169,7 +169,7 @@ def switch_IN(mzi_index, state, working_data):
     return voltage
 
 
-def get_T(N, working_data, sleep_time=0.5):
+def get_T(N, working_data, sleep_time=0.5, show_figure=True, figure_path=None, title=None, v_min=None, v_max=None):
     print(Fore.CYAN + Style.BRIGHT + f"Measuring T matrix for N={N}..." + Style.RESET_ALL)
     if working_data is None:
         raise ValueError("working_data must not be None.")
@@ -197,7 +197,10 @@ def get_T(N, working_data, sleep_time=0.5):
         for ch in input_channels:
             switch_IN(ch, "OFF", working_data)
         switch_IN(in_ch, "ON", working_data)
-        cu.upload_voltage(mcv, working_data)
+        if v_min is None or v_max is None:
+            cu.upload_voltage(mcv, working_data)
+        else:
+            upload_v_checked(mcv, working_data, v_min, v_max)
         time.sleep(sleep_time)
 
         powers = read_powers()
@@ -222,9 +225,16 @@ def get_T(N, working_data, sleep_time=0.5):
     plt.colorbar(label="Normalized power")
     plt.xlabel("Input channel")
     plt.ylabel("Output channel")
-    plt.title("Power transfer matrix")
+    plt.title(title or "Power transfer matrix")
     plt.tight_layout()
-    plt.show()
+    if figure_path is not None:
+        figure_dir = os.path.dirname(os.fspath(figure_path))
+        if figure_dir:
+            os.makedirs(figure_dir, exist_ok=True)
+        plt.savefig(figure_path, dpi=200)
+        print(f"Saved power matrix figure to {figure_path}")
+    if show_figure:
+        plt.show()
     plt.close()
 
     return T
