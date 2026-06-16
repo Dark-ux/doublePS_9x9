@@ -150,6 +150,27 @@ def set_layers_after_to_bar(working_data, cm, layer_index, mzi_table, v_min=0.0,
                 write_checked_port_voltage(ports[1], 0.0, working_data, v_min, v_max)
 
 
+def set_layer_to_bar(working_data, cm, layer_index, mzi_table, v_min=0.0, v_max=5.5):
+    for mzi_id in get_layer_mzi_ids(cm, layer_index):
+        entry = um.get_mzi_entry(mzi_table, mzi_id)
+        ports = entry.get("ports", [])
+        if not ports:
+            continue
+        bar_voltage = um.get_mzi_state_voltage(mzi_table, mzi_id, "BAR", arm_index=0)
+        write_checked_port_voltage(ports[0], bar_voltage, working_data, v_min, v_max)
+        if len(ports) > 1:
+            write_checked_port_voltage(ports[1], 0.0, working_data, v_min, v_max)
+
+
+def set_all_mzis_to_bar(working_data, cm, mzi_table, v_min=0.0, v_max=5.5):
+    for layer_index in range(cm.shape[1]):
+        set_layer_to_bar(working_data, cm, layer_index, mzi_table, v_min, v_max)
+
+
+def is_first_or_last_layer(layer_index, total_layers):
+    return int(layer_index) == 0 or int(layer_index) == int(total_layers) - 1
+
+
 def set_layer_to_bar_voltage_pair(working_data, cm, layer_index, mzi_table, v_min=0.0, v_max=5.5):
     for mzi_id in get_layer_mzi_ids(cm, layer_index):
         entry = um.get_mzi_entry(mzi_table, mzi_id)
@@ -163,9 +184,9 @@ def set_layer_to_bar_voltage_pair(working_data, cm, layer_index, mzi_table, v_mi
             write_checked_port_voltage(port, float(bar_values[arm_index]), working_data, v_min, v_max)
 
 
-def voltage_from_phase_offset(base_voltage, phase_offset, ppi, heater_r, v_min, v_max):
+def voltage_from_phase_offset(base_voltage, base_phase, target_phase, ppi, heater_r, v_min, v_max):
     base_voltage = float(base_voltage)
-    phase_offset = float(phase_offset)
+    phase_offset = float(target_phase) - float(base_phase)
     ppi = float(ppi)
     heater_r = float(heater_r)
     base_power = base_voltage * base_voltage / heater_r
@@ -198,13 +219,17 @@ def set_layer_to_target_prebiased_pair(
             bar_values = entry.get("dtheta_Bar", entry.get("dtheta", []))
             bar_voltage = float(bar_values[0])
             actual_voltage = write_checked_port_voltage(ports[0], bar_voltage, working_data, v_min, v_max)
+            base_phase = np.pi
             records.append(
                 {
                     "mzi_id": int(mzi_id),
+                    "layer": int(layer_index + 1),
                     "arm_index": 0,
                     "port": int(ports[0]),
                     "base_voltage": bar_voltage,
+                    "base_phase": float(base_phase),
                     "target_phase": float(target_thetas[mzi_id - 1, 0]),
+                    "phase_offset": float(target_thetas[mzi_id - 1, 0] - base_phase),
                     "initial_voltage": actual_voltage,
                     "mode": "single_heater_bar",
                 }
@@ -212,25 +237,35 @@ def set_layer_to_target_prebiased_pair(
             continue
 
         pair_entry = inter_cali_pairs.get(str(int(mzi_id)))
-        if not pair_entry:
-            raise KeyError(f"MZI {mzi_id} not found in inter_cali_pairs.")
-        pair_ports = [int(p) for p in pair_entry.get("ports", [])]
-        if pair_ports != [int(p) for p in ports]:
-            raise ValueError(
-                f"MZI {mzi_id} port mismatch: MZI_table ports={ports}, inter_cali_pairs ports={pair_ports}."
-            )
-        pair_base_values = [
-            float(pair_entry["upper_arm_voltage"]),
-            float(pair_entry["lower_arm_voltage"]),
-        ]
+        if pair_entry:
+            pair_ports = [int(p) for p in pair_entry.get("ports", [])]
+            if pair_ports != [int(p) for p in ports]:
+                raise ValueError(
+                    f"MZI {mzi_id} port mismatch: MZI_table ports={ports}, inter_cali_pairs ports={pair_ports}."
+                )
+            pair_base_values = [
+                float(pair_entry["upper_arm_voltage"]),
+                float(pair_entry["lower_arm_voltage"]),
+            ]
+            mode = "inter_cali_pair_pi0_prebiased"
+        else:
+            bar_values = entry.get("dtheta_Bar", entry.get("dtheta", []))
+            if not bar_values:
+                raise KeyError(f"MZI {mzi_id} not found in inter_cali_pairs and has no dtheta_Bar fallback.")
+            pair_base_values = [float(bar_values[0]), 0.0]
+            mode = "mzi_table_upper_bar_lower_zero_pi0_prebiased_fallback"
+            print(f"MZI {mzi_id} missing in inter_cali_pairs; using MZI_table upper Bar and lower 0 V fallback.")
 
         for arm_index, port in enumerate(ports):
             if arm_index >= len(ppi_values) or arm_index >= len(heater_r_values):
                 raise ValueError(f"MZI {mzi_id} missing Ppi/heater_R for arm_index {arm_index}.")
             base_voltage = float(pair_base_values[arm_index])
             target_phase = float(target_thetas[mzi_id - 1, arm_index])
+            # inter_cali_pairs is calibrated near theta1=pi, theta2=0.
+            base_phase = np.pi if arm_index == 0 else 0.0
             initial_voltage = voltage_from_phase_offset(
                 base_voltage,
+                base_phase,
                 target_phase,
                 ppi_values[arm_index],
                 heater_r_values[arm_index],
@@ -241,12 +276,15 @@ def set_layer_to_target_prebiased_pair(
             records.append(
                 {
                     "mzi_id": int(mzi_id),
+                    "layer": int(layer_index + 1),
                     "arm_index": int(arm_index),
                     "port": int(port),
                     "base_voltage": base_voltage,
+                    "base_phase": float(base_phase),
                     "target_phase": target_phase,
+                    "phase_offset": float(target_phase - base_phase),
                     "initial_voltage": actual_voltage,
-                    "mode": "inter_cali_pair_target_prebiased",
+                    "mode": mode,
                 }
             )
     return records
@@ -284,10 +322,11 @@ def voltage_to_dry_run_theta(mzi_table, mzi_id, arm_index, voltage):
             pair_base_values = [float(pair_entry["upper_arm_voltage"]), float(pair_entry["lower_arm_voltage"])]
             base_voltage = pair_base_values[arm_index]
         else:
-            base_voltage = float(bar_values[arm_index])
+            base_voltage = float(bar_values[0]) if arm_index == 0 else 0.0
         base_power = base_voltage**2 / float(heater_r_values[arm_index])
         power = float(voltage) ** 2 / float(heater_r_values[arm_index])
-        return float((power - base_power) / float(ppi_values[arm_index]) * np.pi)
+        base_phase = np.pi if arm_index == 0 else 0.0
+        return float(base_phase + (power - base_power) / float(ppi_values[arm_index]) * np.pi)
 
     bar_v = float(bar_values[arm_index])
     cross_v = float(cross_values[arm_index])
@@ -299,7 +338,8 @@ def voltage_to_dry_run_theta(mzi_table, mzi_id, arm_index, voltage):
 
 
 def build_dry_run_thetas(args, working_data):
-    thetas = build_target_thetas_for_layer(args.cm, args.target_thetas_array, args.layer_index).copy()
+    layer_index = int(getattr(args, "current_layer_index", args.layer_index))
+    thetas = build_target_thetas_for_layer(args.cm, args.target_thetas_array, layer_index).copy()
     voltage_to_dry_run_theta.inter_cali_pairs = getattr(args, "inter_cali_pairs_data", {})
     for heater in args.active_heaters:
         port_idx = int(heater["port"]) - 1
@@ -489,6 +529,71 @@ def create_run_dir(out_dir):
     return run_dir
 
 
+def append_layer_summary(run_dir, row):
+    write_rows(
+        run_dir / "layer_summary.csv",
+        [row],
+        [
+            "global_target_layer",
+            "current_layer",
+            "layer_status",
+            "skip_reason",
+            "start_loss",
+            "final_loss",
+            "iterations_completed",
+            "active_heater_labels",
+            "active_heater_ports",
+        ],
+    )
+
+
+def append_multilayer_iter_log(run_dir, row):
+    write_rows(
+        run_dir / "iter_log.csv",
+        [row],
+        [
+            "global_target_layer",
+            "current_layer",
+            "layer_status",
+            "skip_reason",
+            "layer_iter",
+            "loss_before_iter",
+            "loss_after_iter",
+            "grad_norm",
+            "max_abs_grad",
+            "accepted",
+            "rejected",
+            "lr_used",
+        ],
+    )
+
+
+def append_heater_update_log(run_dir, rows):
+    write_rows(
+        run_dir / "heater_update_log.csv",
+        rows,
+        [
+            "global_target_layer",
+            "current_layer",
+            "layer_status",
+            "skip_reason",
+            "layer_iter",
+            "loss_before_iter",
+            "loss_after_iter",
+            "heater_label",
+            "heater_port",
+            "mzi_id",
+            "arm_index",
+            "voltage_before",
+            "voltage_after",
+            "gradient",
+            "accepted",
+            "line_search_trials",
+            "lr_used",
+        ],
+    )
+
+
 def initialize_working_data(args, mzi_table, cm):
     working_data = cu.generate_working_data()
     init_records = []
@@ -551,6 +656,191 @@ def maybe_initialize_hardware(args):
     return hardware
 
 
+def save_initial_voltage_records(run_dir, records):
+    if not records:
+        return
+    path = run_dir / "initial_voltage_plan.csv"
+    exists = path.exists()
+    pd.DataFrame(records).to_csv(path, mode="a", index=False, header=not exists)
+
+
+def optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_thetas, run_dir):
+    args.current_layer_index = int(layer_index)
+    set_layers_after_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
+    init_records = set_layer_to_target_prebiased_pair(
+        working_data,
+        cm,
+        layer_index,
+        mzi_table,
+        args.inter_cali_pairs_data,
+        target_thetas,
+        args.v_min,
+        args.v_max,
+    )
+    save_initial_voltage_records(run_dir, init_records)
+
+    active_mzi_ids = get_layer_mzi_ids(cm, layer_index)
+    active_heaters = get_active_heater_ports(mzi_table, active_mzi_ids)
+    args.active_heaters = active_heaters
+    P_target = build_target_power_matrix(cm, target_thetas, args.output_count, layer_index)
+    np.savetxt(run_dir / f"target_power_matrix_layer{layer_index + 1:02d}.csv", P_target, delimiter=",")
+
+    print(f"Optimizing layer {layer_index + 1}: MZI ids {active_mzi_ids}")
+    print(f"Active heaters: {active_heaters}")
+    print("Initial active-layer voltages:")
+    for rec in init_records:
+        print(
+            f"  MZI{rec['mzi_id']}_arm{rec['arm_index']} port {rec['port']}: "
+            f"{rec['base_voltage']:.3f} V -> {rec['initial_voltage']:.3f} V "
+            f"(base_phase={rec.get('base_phase', 0.0):.6g}, "
+            f"target_phase={rec['target_phase']:.6g}, "
+            f"phase_offset={rec.get('phase_offset', 0.0):.6g}, {rec['mode']})"
+        )
+
+    prev_loss = None
+    final_loss = None
+    final_power = None
+    iterations_completed = 0
+    layer_start_loss = None
+
+    for iter_idx in range(args.max_iter):
+        args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_baseline"
+        P_current = measure_power_matrix(args, working_data)
+        loss = power_matrix_loss(P_current, P_target)
+        if layer_start_loss is None:
+            layer_start_loss = float(loss)
+        np.savetxt(run_dir / f"P_current_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv", P_current, delimiter=",")
+        save_voltage_state(run_dir / f"voltage_state_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv", working_data)
+
+        current_loss = loss
+        grad_values = []
+        heater_rows = []
+        accepted_any = False
+        rejected_any = False
+        lr_values = []
+
+        for heater in active_heaters:
+            heater_loss_before = current_loss
+            heater_before = get_heater_voltages(working_data, [heater])
+            args.measure_context_prefix = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}"
+            grad, _ = finite_difference_gradient(args, working_data, [heater], heater_before, P_target)
+            grad_value = float(grad[0]) if grad.size else 0.0
+            grad_values.append(grad_value)
+
+            accepted = True
+            rejected = False
+            accepted_lr = float(args.lr)
+            line_search_trials = 0
+            heater_after = update_voltages(heater_before, grad, args.lr, args.max_step_v, args.v_min, args.v_max)
+
+            if args.line_search:
+                accepted = False
+                trial_lr = float(args.lr)
+                while trial_lr >= float(args.line_search_min_lr):
+                    line_search_trials += 1
+                    trial_after = update_voltages(heater_before, grad, trial_lr, args.max_step_v, args.v_min, args.v_max)
+                    set_heater_voltages(working_data, [heater], trial_after, args.v_min, args.v_max)
+                    args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_{heater['label']}_line_search"
+                    trial_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+                    if trial_loss < current_loss:
+                        accepted = True
+                        accepted_lr = trial_lr
+                        heater_after = trial_after
+                        current_loss = trial_loss
+                        break
+                    trial_lr *= float(args.line_search_shrink)
+                if not accepted:
+                    rejected = True
+                    heater_after = heater_before.copy()
+                    set_heater_voltages(working_data, [heater], heater_before, args.v_min, args.v_max)
+            else:
+                set_heater_voltages(working_data, [heater], heater_after, args.v_min, args.v_max)
+                args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_{heater['label']}_accepted"
+                current_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+
+            accepted_any = accepted_any or accepted
+            rejected_any = rejected_any or rejected
+            lr_values.append(float(accepted_lr))
+            heater_rows.append(
+                {
+                    "global_target_layer": int(args.layer),
+                    "current_layer": int(layer_index + 1),
+                    "layer_status": "optimized",
+                    "skip_reason": "",
+                    "layer_iter": int(iter_idx),
+                    "loss_before_iter": float(heater_loss_before),
+                    "loss_after_iter": float(current_loss),
+                    "heater_label": heater["label"],
+                    "heater_port": int(heater["port"]),
+                    "mzi_id": int(heater["mzi_id"]),
+                    "arm_index": int(heater["arm_index"]),
+                    "voltage_before": float(heater_before[0]),
+                    "voltage_after": float(heater_after[0]),
+                    "gradient": grad_value,
+                    "accepted": bool(accepted),
+                    "line_search_trials": int(line_search_trials),
+                    "lr_used": float(accepted_lr),
+                }
+            )
+
+        args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_final"
+        final_power = measure_power_matrix(args, working_data)
+        final_loss = power_matrix_loss(final_power, P_target)
+        grad_array = np.asarray(grad_values, dtype=float)
+        grad_norm = float(np.linalg.norm(grad_array))
+        max_abs_grad = float(np.max(np.abs(grad_array))) if grad_array.size else 0.0
+
+        append_multilayer_iter_log(
+            run_dir,
+            {
+                "global_target_layer": int(args.layer),
+                "current_layer": int(layer_index + 1),
+                "layer_status": "optimized",
+                "skip_reason": "",
+                "layer_iter": int(iter_idx),
+                "loss_before_iter": float(loss),
+                "loss_after_iter": float(final_loss),
+                "grad_norm": grad_norm,
+                "max_abs_grad": max_abs_grad,
+                "accepted": bool(accepted_any),
+                "rejected": bool(rejected_any),
+                "lr_used": min(lr_values) if lr_values else float(args.lr),
+            },
+        )
+        append_heater_update_log(run_dir, heater_rows)
+        iterations_completed += 1
+
+        print(
+            f"layer={layer_index + 1}, iter={iter_idx:03d}, loss={loss:.6g}, "
+            f"final_loss={final_loss:.6g}, grad_norm={grad_norm:.6g}, accepted_any={accepted_any}"
+        )
+
+        if prev_loss is not None and abs(prev_loss - final_loss) < args.loss_tol:
+            break
+        prev_loss = final_loss
+
+    if final_power is None:
+        args.measure_context = f"layer{layer_index + 1:02d}_final"
+        final_power = measure_power_matrix(args, working_data)
+        final_loss = power_matrix_loss(final_power, P_target)
+
+    append_layer_summary(
+        run_dir,
+        {
+            "global_target_layer": int(args.layer),
+            "current_layer": int(layer_index + 1),
+            "layer_status": "optimized",
+            "skip_reason": "",
+            "start_loss": "" if layer_start_loss is None else float(layer_start_loss),
+            "final_loss": float(final_loss),
+            "iterations_completed": int(iterations_completed),
+            "active_heater_labels": ";".join(h["label"] for h in active_heaters),
+            "active_heater_ports": ";".join(str(h["port"]) for h in active_heaters),
+        },
+    )
+    return final_power, final_loss
+
+
 def run_optimization(args):
     cm = du.Clements_matrix(args.N)
     mzi_count = args.N * (args.N - 1) // 2
@@ -569,14 +859,8 @@ def run_optimization(args):
     args.inter_cali_pairs_data = inter_cali_pairs
 
     um.BW = um.load_bw_phases(args.bw_dir, expected_count=(args.N - 3) // 2)
-
-    active_mzi_ids = get_layer_mzi_ids(cm, args.layer_index)
-    active_heaters = get_active_heater_ports(mzi_table, active_mzi_ids)
-    args.active_heaters = active_heaters
     args.hardware = maybe_initialize_hardware(args)
 
-    working_data = initialize_working_data(args, mzi_table, cm)
-    P_target = build_target_power_matrix(cm, target_thetas, args.output_count, args.layer_index)
     run_dir = create_run_dir(args.out_dir)
     args.run_dir = run_dir
     args.measure_count = 0
@@ -587,180 +871,86 @@ def run_optimization(args):
         "target_thetas_array",
         "mzi_table_data",
         "inter_cali_pairs_data",
-        "active_heaters",
         "hardware",
         "run_dir",
         "measure_count",
         "measure_context",
         "measure_context_prefix",
         "initial_voltage_records",
+        "current_layer_index",
     ):
         config.pop(key, None)
     config["layer_index_0based"] = args.layer_index
-    config["active_mzi_ids"] = active_mzi_ids
-    config["active_heaters"] = active_heaters
+    config["layer_semantics"] = "optimize_from_all_bar_through_target_layer"
     with open(run_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     np.savetxt(run_dir / "target_thetas_used.csv", target_thetas, delimiter=",", header="theta1,theta2", comments="")
-    np.savetxt(run_dir / "target_power_matrix.csv", P_target, delimiter=",")
-    if getattr(args, "initial_voltage_records", None):
-        pd.DataFrame(args.initial_voltage_records).to_csv(run_dir / "initial_voltage_plan.csv", index=False)
 
     print("Layerwise loss optimization")
-    print(f"Layer: {args.layer} (0-based column {args.layer_index})")
-    print(f"MZI ids: {active_mzi_ids}")
-    print(f"Active heaters: {active_heaters}")
+    print(f"Target layer: {args.layer} (0-based column {args.layer_index}); process layers 1..{args.layer}")
     print(f"Voltage range: [{args.v_min}, {args.v_max}], delta_v={args.delta_v}, lr={args.lr}")
     print(f"dry_run={args.dry_run}, confirm_hardware={args.confirm_hardware}")
     print(f"Run dir: {run_dir}")
-    if getattr(args, "initial_voltage_records", None):
-        print("Initial active-layer voltages:")
-        for rec in args.initial_voltage_records:
-            print(
-                f"  MZI{rec['mzi_id']}_arm{rec['arm_index']} port {rec['port']}: "
-                f"{rec['base_voltage']:.3f} V -> {rec['initial_voltage']:.3f} V "
-                f"(target_phase={rec['target_phase']:.6g}, {rec['mode']})"
-            )
 
-    prev_loss = None
-    final_loss = None
+    working_data = cu.generate_working_data()
+    set_all_mzis_to_bar(working_data, cm, mzi_table, args.v_min, args.v_max)
+    validate_all_voltages(working_data, args.v_min, args.v_max)
     final_power = None
+    final_loss = None
 
-    for iter_idx in range(args.max_iter):
-        args.measure_context = f"iter{iter_idx:03d}_baseline"
-        P_current = measure_power_matrix(args, working_data)
-        loss = power_matrix_loss(P_current, P_target)
-        np.savetxt(run_dir / f"P_current_iter{iter_idx:03d}.csv", P_current, delimiter=",")
-        save_voltage_state(run_dir / f"voltage_state_iter{iter_idx:03d}.csv", working_data)
-
-        current_loss = loss
-        grad_values = []
-        grad_records = []
-        voltage_rows = []
-        accepted_any = False
-        rejected_any = False
-        accepted_lrs = []
-
-        for heater in active_heaters:
-            heater_before = get_heater_voltages(working_data, [heater])
-            args.measure_context_prefix = f"iter{iter_idx:03d}"
-            grad, single_grad_records = finite_difference_gradient(
-                args,
-                working_data,
-                [heater],
-                heater_before,
-                P_target,
-            )
-            grad_value = float(grad[0]) if grad.size else 0.0
-            grad_values.append(grad_value)
-            grad_records.extend(single_grad_records)
-
-            accepted = True
-            rejected = False
-            accepted_lr = float(args.lr)
-            heater_after = update_voltages(
-                heater_before,
-                grad,
-                args.lr,
-                args.max_step_v,
-                args.v_min,
-                args.v_max,
-            )
-
-            if args.line_search:
-                accepted = False
-                trial_lr = float(args.lr)
-                while trial_lr >= float(args.line_search_min_lr):
-                    trial_after = update_voltages(
-                        heater_before,
-                        grad,
-                        trial_lr,
-                        args.max_step_v,
-                        args.v_min,
-                        args.v_max,
-                    )
-                    set_heater_voltages(working_data, [heater], trial_after, args.v_min, args.v_max)
-                    args.measure_context = f"iter{iter_idx:03d}_{heater['label']}_line_search"
-                    trial_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
-                    if trial_loss < current_loss:
-                        accepted = True
-                        accepted_lr = trial_lr
-                        heater_after = trial_after
-                        current_loss = trial_loss
-                        break
-                    trial_lr *= float(args.line_search_shrink)
-                if not accepted:
-                    rejected = True
-                    heater_after = heater_before.copy()
-                    set_heater_voltages(working_data, [heater], heater_before, args.v_min, args.v_max)
-            else:
-                set_heater_voltages(working_data, [heater], heater_after, args.v_min, args.v_max)
-                args.measure_context = f"iter{iter_idx:03d}_{heater['label']}_accepted"
-                current_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
-
-            accepted_any = accepted_any or accepted
-            rejected_any = rejected_any or rejected
-            accepted_lrs.append(float(accepted_lr))
-            voltage_rows.append(
+    for layer_index in range(0, args.layer_index + 1):
+        if is_first_or_last_layer(layer_index, cm.shape[1]):
+            set_layer_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
+            set_layers_after_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
+            skip_reason = "first_or_last_layer_bar_fixed"
+            print(f"Skipping layer {layer_index + 1}: {skip_reason}")
+            append_layer_summary(
+                run_dir,
                 {
-                    "iter": iter_idx,
-                    "label": heater["label"],
-                    "mzi_id": heater["mzi_id"],
-                    "arm_index": heater["arm_index"],
-                    "port": heater["port"],
-                    "voltage_before": float(heater_before[0]),
-                    "voltage_after": float(heater_after[0]),
-                    "accepted": bool(accepted),
-                }
+                    "global_target_layer": int(args.layer),
+                    "current_layer": int(layer_index + 1),
+                    "layer_status": "skipped",
+                    "skip_reason": skip_reason,
+                    "start_loss": "",
+                    "final_loss": "",
+                    "iterations_completed": 0,
+                    "active_heater_labels": "",
+                    "active_heater_ports": "",
+                },
             )
+            append_multilayer_iter_log(
+                run_dir,
+                {
+                    "global_target_layer": int(args.layer),
+                    "current_layer": int(layer_index + 1),
+                    "layer_status": "skipped",
+                    "skip_reason": skip_reason,
+                    "layer_iter": "",
+                    "loss_before_iter": "",
+                    "loss_after_iter": "",
+                    "grad_norm": "",
+                    "max_abs_grad": "",
+                    "accepted": "",
+                    "rejected": "",
+                    "lr_used": "",
+                },
+            )
+            continue
 
-        args.measure_context = f"iter{iter_idx:03d}_final"
-        final_power = measure_power_matrix(args, working_data)
-        final_loss = power_matrix_loss(final_power, P_target)
-        grad_array = np.asarray(grad_values, dtype=float)
-        grad_norm = float(np.linalg.norm(grad_array))
-        max_abs_grad = float(np.max(np.abs(grad_array))) if grad_array.size else 0.0
-        for rec in grad_records:
-            rec["iter"] = iter_idx
-
-        append_iteration_logs(
-            run_dir,
-            {
-                "iter": iter_idx,
-                "loss": loss,
-                "accepted_loss": final_loss,
-                "lr": min(accepted_lrs) if accepted_lrs else float(args.lr),
-                "grad_norm": grad_norm,
-                "max_abs_grad": max_abs_grad,
-                "active_heater_labels": ";".join(h["label"] for h in active_heaters),
-                "active_heater_ports": ";".join(str(h["port"]) for h in active_heaters),
-                "accepted": bool(accepted_any),
-                "rejected": bool(rejected_any),
-            },
-            voltage_rows,
-            grad_records,
-        )
-
-        print(
-            f"iter={iter_idx:03d}, loss={loss:.6g}, final_loss={final_loss:.6g}, "
-            f"grad_norm={grad_norm:.6g}, accepted_any={accepted_any}"
-        )
-
-        if prev_loss is not None and abs(prev_loss - final_loss) < args.loss_tol:
-            break
-        prev_loss = final_loss
+        final_power, final_loss = optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_thetas, run_dir)
 
     if final_power is None:
-        args.measure_context = "final"
+        args.active_heaters = []
+        args.current_layer_index = int(args.layer_index)
+        args.measure_context = "final_bar_state"
         final_power = measure_power_matrix(args, working_data)
-        final_loss = power_matrix_loss(final_power, P_target)
+        final_target = build_target_power_matrix(cm, target_thetas, args.output_count, args.layer_index)
+        final_loss = power_matrix_loss(final_power, final_target)
 
     np.savetxt(run_dir / "final_power_matrix.csv", final_power, delimiter=",")
     save_voltage_state(run_dir / "final_voltage.csv", working_data)
     print(f"Final loss: {final_loss:.6g}")
-    print("Final active voltages:")
-    for heater, voltage in zip(active_heaters, get_heater_voltages(working_data, active_heaters)):
-        print(f"  {heater['label']} port {heater['port']}: {voltage:.3f} V")
+    print("Saved final voltage and power matrix.")
     return run_dir
 
 
@@ -768,11 +958,11 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description=(
             "Layerwise finite-difference loss optimization for normalized power matrices. "
-            "--layer is a 1-based Clements column/layer index; internally it is converted to 0-based."
+            "--layer is a 1-based target layer; the optimizer starts from all-Bar and processes layers 1..layer."
         )
     )
     parser.add_argument("--N", type=int, default=9)
-    parser.add_argument("--layer", type=int, required=True, help="1-based Clements layer/column index to optimize.")
+    parser.add_argument("--layer", type=int, required=True, help="1-based target layer to optimize through from all-Bar.")
     parser.add_argument("--target-thetas", required=True, help="Target theta file path, .csv or .npy.")
     parser.add_argument("--mzi-table", default=os.path.join("Scandata", "MZI_table.json"))
     parser.add_argument("--inter-cali-pairs", default=os.path.join("Scandata", "inter_cali_pairs.json"))
@@ -806,6 +996,8 @@ def main():
         raise ValueError("--N must be >= 2")
     if args.v_min > args.v_max:
         raise ValueError("--v-min must be <= --v-max")
+    if args.init_mode != "bar":
+        raise RuntimeError("Resume/current initialization is disabled; every run must start from all-Bar.")
     if not args.dry_run and not args.confirm_hardware:
         raise RuntimeError("Refusing hardware access: set --confirm-hardware true with --dry-run false.")
     run_optimization(args)
