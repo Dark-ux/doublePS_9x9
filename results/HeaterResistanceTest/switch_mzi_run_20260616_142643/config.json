@@ -1,0 +1,73 @@
+{
+  "in_mzi": "IN_MZI.txt",
+  "out_root": "results/HeaterResistanceTest",
+  "ser_address": "COM3",
+  "start_v": 0.5,
+  "stop_v": 2.5,
+  "step_v": 0.5,
+  "settle_s": 0.2,
+  "current_retries": 10,
+  "current_retry_delay_s": 0.2,
+  "voltage_limit_v": 5.5,
+  "dry_run": false,
+  "confirm_hardware": true,
+  "update_in_mzi": true,
+  "restore_zero": true,
+  "voltage_points": [
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    2.5
+  ],
+  "switch_mzis": [
+    {
+      "MZI": 1,
+      "PORT": 43,
+      "ON": 3.109,
+      "OFF": 4.318
+    },
+    {
+      "MZI": 2,
+      "PORT": 45,
+      "ON": 3.005,
+      "OFF": 4.261
+    },
+    {
+      "MZI": 3,
+      "PORT": 41,
+      "ON": 2.859,
+      "OFF": 4.164
+    },
+    {
+      "MZI": 4,
+      "PORT": 48,
+      "ON": 2.972,
+      "OFF": 4.23
+    },
+    {
+      "MZI": 5,
+      "PORT": 44,
+      "ON": 2.604,
+      "OFF": 3.977
+    },
+    {
+      "MZI": 6,
+      "PORT": 46,
+      "ON": 3.082,
+      "OFF": 4.329
+    },
+    {
+      "MZI": 7,
+      "PORT": 42,
+      "ON": 2.641,
+      "OFF": 3.995
+    },
+    {
+      "MZI": 8,
+      "PORT": 49,
+      "ON": 3.062,
+      "OFF": 4.294
+    }
+  ]
+}

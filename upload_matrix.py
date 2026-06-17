@@ -169,7 +169,102 @@ def switch_IN(mzi_index, state, working_data):
     return voltage
 
 
-def get_T(N, working_data, sleep_time=0.5, show_figure=True, figure_path=None, title=None, v_min=None, v_max=None):
+def load_switch_mzi_table(path="IN_MZI.txt"):
+    table = pd.read_csv(path)
+    required_cols = {"MZI", "PORT", "ON", "OFF", "HEATER_R_OHM"}
+    missing_cols = required_cols.difference(table.columns)
+    if missing_cols:
+        raise ValueError(f"{path} missing required columns for switch current check: {sorted(missing_cols)}")
+
+    table = table.copy()
+    for col in ("MZI", "PORT", "ON", "OFF", "HEATER_R_OHM"):
+        table[col] = pd.to_numeric(table[col], errors="coerce")
+    bad_rows = table[list(required_cols)].isna().any(axis=1)
+    if bad_rows.any():
+        raise ValueError(f"{path} contains invalid switch MZI rows: {bad_rows[bad_rows].index.tolist()}")
+    if (table["HEATER_R_OHM"] <= 0).any():
+        bad_rows = table.index[table["HEATER_R_OHM"] <= 0].tolist()
+        raise ValueError(f"{path} contains non-positive HEATER_R_OHM rows: {bad_rows}")
+    return table
+
+
+def verify_switch_mzi_currents(mcv, working_data, switch_table, tolerance=0.10, min_abs_tol_mA=0.01):
+    currents_mA = cu.read_current(mcv)
+    failures = []
+
+    for _, row in switch_table.iterrows():
+        mzi_index = int(row["MZI"])
+        port = int(row["PORT"])
+        port_idx = port - 1
+        if port_idx < 0 or port_idx >= len(working_data):
+            raise IndexError(f"Switch MZI {mzi_index} PORT {port} is out of range for working_data.")
+        if port_idx >= len(currents_mA):
+            raise IndexError(f"Switch MZI {mzi_index} PORT {port} is out of range for current readback.")
+
+        voltage = float(working_data.iloc[port_idx, 0])
+        resistance = float(row["HEATER_R_OHM"])
+        expected_mA = voltage / resistance * 1000.0
+        actual_mA = currents_mA[port_idx]
+        abs_tol_mA = max(abs(expected_mA) * tolerance, min_abs_tol_mA)
+
+        if actual_mA is None:
+            failures.append(
+                {
+                    "mzi": mzi_index,
+                    "port": port,
+                    "voltage": voltage,
+                    "expected_mA": expected_mA,
+                    "actual_mA": None,
+                    "lower_mA": expected_mA - abs_tol_mA,
+                    "upper_mA": expected_mA + abs_tol_mA,
+                }
+            )
+            continue
+
+        actual_mA = float(actual_mA)
+        if abs(actual_mA - expected_mA) > abs_tol_mA:
+            failures.append(
+                {
+                    "mzi": mzi_index,
+                    "port": port,
+                    "voltage": voltage,
+                    "expected_mA": expected_mA,
+                    "actual_mA": actual_mA,
+                    "lower_mA": expected_mA - abs_tol_mA,
+                    "upper_mA": expected_mA + abs_tol_mA,
+                }
+            )
+
+    return failures
+
+
+def append_switch_current_check_log(log_path, rows):
+    if log_path is None or not rows:
+        return
+    log_dir = os.path.dirname(os.fspath(log_path))
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    exists = os.path.exists(log_path)
+    pd.DataFrame(rows).to_csv(log_path, mode="a", index=False, header=not exists)
+
+
+def get_T(
+    N,
+    working_data,
+    sleep_time=0.5,
+    show_figure=True,
+    figure_path=None,
+    title=None,
+    v_min=None,
+    v_max=None,
+    switch_current_check=True,
+    switch_current_tolerance=0.10,
+    switch_current_retries=3,
+    switch_current_settle=0.2,
+    switch_current_log_path=None,
+    switch_current_measure_idx=None,
+    switch_current_measure_context=None,
+):
     print(Fore.CYAN + Style.BRIGHT + f"Measuring T matrix for N={N}..." + Style.RESET_ALL)
     if working_data is None:
         raise ValueError("working_data must not be None.")
@@ -189,6 +284,87 @@ def get_T(N, working_data, sleep_time=0.5, show_figure=True, figure_path=None, t
                 raise ValueError(f"Invalid power at channel {idx + 1}: {val}") from exc
         return powers
 
+    switch_table = load_switch_mzi_table() if switch_current_check else None
+
+    def upload_current_switch_state(in_ch):
+        last_failures = []
+        max_uploads = max(1, int(switch_current_retries) + 1)
+        for attempt in range(1, max_uploads + 1):
+            if v_min is None or v_max is None:
+                cu.upload_voltage(mcv, working_data)
+            else:
+                upload_v_checked(mcv, working_data, v_min, v_max)
+
+            if not switch_current_check:
+                return
+
+            time.sleep(switch_current_settle)
+            last_failures = verify_switch_mzi_currents(
+                mcv,
+                working_data,
+                switch_table,
+                tolerance=switch_current_tolerance,
+            )
+            if not last_failures:
+                print(f"Switch MZI current check passed for input {in_ch} on attempt {attempt}.")
+                return
+
+            retry_text = (
+                "re-uploading current voltage state."
+                if attempt < max_uploads
+                else "maximum uploads reached; continuing without another re-upload."
+            )
+            print(
+                Fore.YELLOW
+                + f"Switch MZI current check failed for input {in_ch} on attempt {attempt}; {retry_text}"
+                + Style.RESET_ALL
+            )
+            for item in last_failures:
+                actual = "None" if item["actual_mA"] is None else f"{item['actual_mA']:.4f}"
+                print(
+                    f"  MZI{item['mzi']} port {item['port']}: "
+                    f"V={item['voltage']:.3f} V, I_expected={item['expected_mA']:.4f} mA, "
+                    f"I_actual={actual} mA, allowed=[{item['lower_mA']:.4f}, {item['upper_mA']:.4f}] mA"
+                )
+
+        failed_parts = []
+        for item in last_failures:
+            actual = "None" if item["actual_mA"] is None else f"{item['actual_mA']:.4f} mA"
+            failed_parts.append(
+                f"MZI{item['mzi']} port {item['port']} expected {item['expected_mA']:.4f} mA got {actual}"
+            )
+        failed_desc = "; ".join(failed_parts)
+        print(
+            Fore.RED
+            + f"Switch MZI current check still failed after {max_uploads} uploads for input {in_ch}; "
+            + "continuing measurement with the current voltage state."
+            + Style.RESET_ALL
+        )
+        append_switch_current_check_log(
+            switch_current_log_path,
+            [
+                {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "measure_idx": switch_current_measure_idx,
+                    "measure_context": switch_current_measure_context,
+                    "input_channel": in_ch,
+                    "max_uploads": max_uploads,
+                    "tolerance": switch_current_tolerance,
+                    "mzi": item["mzi"],
+                    "port": item["port"],
+                    "voltage": item["voltage"],
+                    "expected_mA": item["expected_mA"],
+                    "actual_mA": item["actual_mA"],
+                    "lower_mA": item["lower_mA"],
+                    "upper_mA": item["upper_mA"],
+                    "failure_summary": failed_desc,
+                    "action": "continued_after_failed_reuploads",
+                }
+                for item in last_failures
+            ],
+        )
+        return
+
     input_channels = list(range(1, N))
     cols = []
     output_count = None
@@ -197,10 +373,7 @@ def get_T(N, working_data, sleep_time=0.5, show_figure=True, figure_path=None, t
         for ch in input_channels:
             switch_IN(ch, "OFF", working_data)
         switch_IN(in_ch, "ON", working_data)
-        if v_min is None or v_max is None:
-            cu.upload_voltage(mcv, working_data)
-        else:
-            upload_v_checked(mcv, working_data, v_min, v_max)
+        upload_current_switch_state(in_ch)
         time.sleep(sleep_time)
 
         powers = read_powers()

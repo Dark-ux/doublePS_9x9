@@ -367,6 +367,9 @@ def measure_power_matrix(args, working_data):
     if getattr(args, "run_dir", None) is not None:
         figure_dir = Path(args.run_dir) / "power_matrix_figures"
         figure_path = figure_dir / f"measure_{measure_idx:04d}_{measure_context}.png"
+        switch_current_log_path = Path(args.run_dir) / "switch_current_check_log.csv"
+    else:
+        switch_current_log_path = None
     print(f"[measure {measure_idx:04d}] {measure_context}: uploading voltages and reading normalized power matrix")
     um.upload_v_checked(args.hardware["mcv"], working_data, args.v_min, args.v_max)
     time.sleep(args.settle_time)
@@ -379,6 +382,9 @@ def measure_power_matrix(args, working_data):
         title=f"{measure_context} measure {measure_idx:04d}",
         v_min=args.v_min,
         v_max=args.v_max,
+        switch_current_log_path=switch_current_log_path,
+        switch_current_measure_idx=measure_idx,
+        switch_current_measure_context=measure_context,
     )
     args.measure_count = measure_idx + 1
     return P_current
@@ -864,6 +870,7 @@ def run_optimization(args):
     run_dir = create_run_dir(args.out_dir)
     args.run_dir = run_dir
     args.measure_count = 0
+    cu.set_upload_voltage_failure_log_path(run_dir / "upload_voltage_failure_log.csv")
 
     config = vars(args).copy()
     for key in (

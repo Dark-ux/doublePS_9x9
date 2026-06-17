@@ -11,43 +11,34 @@ import pandas as pd
 import utils.communication as cu
 
 
-DEFAULT_SER_ADDRESS = "COM3"
-DEFAULT_MZI_TABLE = "Scandata/MZI_table.json"
+DEFAULT_IN_MZI = "IN_MZI.txt"
 DEFAULT_OUT_ROOT = "results/HeaterResistanceTest"
-DEFAULT_MZI_IDS = [5, 6, 7, 8]
-DEFAULT_TARGET_HEATER = "6d"
+DEFAULT_SER_ADDRESS = "COM3"
+RESISTANCE_COLUMN = "HEATER_R_OHM"
 
 
 def parse_bool(value):
     if isinstance(value, bool):
         return value
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+    value = str(value).strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
-def parse_heater_label(label):
-    text = str(label).strip().lower()
-    if len(text) < 2 or text[-1] not in {"u", "d"}:
-        raise ValueError(f"Invalid heater label {label!r}; expected like 6d.")
-    return int(text[:-1]), text[-1]
-
-
-def load_second_column_heaters(mzi_table_path, mzi_ids=DEFAULT_MZI_IDS):
-    with open(mzi_table_path, "r", encoding="utf-8") as f:
-        table = json.load(f)
-    heaters = {}
-    for mzi_id in mzi_ids:
-        entry = table[str(int(mzi_id))]
-        ports = entry["ports"]
-        resistances = entry.get("heater_R", [None] * len(ports))
-        for arm_idx, arm in enumerate(("u", "d")):
-            label = f"{int(mzi_id)}{arm}"
-            heaters[label] = {
-                "mzi_id": int(mzi_id),
-                "arm": arm,
-                "port": int(ports[arm_idx]),
-                "resistance_ohm": None if resistances[arm_idx] is None else float(resistances[arm_idx]),
-            }
-    return heaters
+def load_switch_mzis(path):
+    table = pd.read_csv(path)
+    required = {"MZI", "PORT", "ON", "OFF"}
+    missing = required.difference(table.columns)
+    if missing:
+        raise ValueError(f"{path} missing required columns: {sorted(missing)}")
+    table["MZI"] = table["MZI"].astype(int)
+    table["PORT"] = table["PORT"].astype(int)
+    if len(table) != 8:
+        print(f"[heater_resistance_test] warning: expected 8 switch MZIs, found {len(table)} rows.")
+    return table
 
 
 def validate_voltage_range(working_data, voltage_limit_v):
@@ -86,215 +77,232 @@ def read_current_port_retry(mcv, port, retries=10, delay_s=0.2):
                 return None, attempt, f"read_current_failed: {exc}"
             time.sleep(float(delay_s))
             continue
+
         last_none_count = sum(value is None for value in currents)
         idx = int(port) - 1
         if 0 <= idx < len(currents) and currents[idx] is not None:
+            # communication.read_current returns mA.
             return float(currents[idx]), attempt, ""
         time.sleep(float(delay_s))
     return None, attempts, f"target_current_none; all_channel_none_count={last_none_count}"
 
 
 def build_voltage_points(start_v, stop_v, step_v):
-    count = int(round((float(stop_v) - float(start_v)) / float(step_v))) + 1
-    return np.round(np.linspace(float(start_v), float(stop_v), count), 10)
+    if step_v <= 0:
+        raise ValueError("--step-v must be positive.")
+    if stop_v < start_v:
+        raise ValueError("--stop-v must be >= --start-v.")
+    count = int(np.floor((float(stop_v) - float(start_v)) / float(step_v) + 1e-12)) + 1
+    values = [round(float(start_v) + idx * float(step_v), 6) for idx in range(count)]
+    if values[-1] < float(stop_v) - 1e-12:
+        values.append(round(float(stop_v), 6))
+    return np.asarray(values, dtype=float)
 
 
-def fit_line(voltage_v, current_a):
-    x = np.asarray(voltage_v, dtype=float)
-    y = np.asarray(current_a, dtype=float)
-    valid = np.isfinite(x) & np.isfinite(y)
+def fit_resistance(voltage_v, current_mA):
+    voltage = np.asarray(voltage_v, dtype=float)
+    current_a = np.asarray(current_mA, dtype=float) * 1e-3
+    valid = np.isfinite(voltage) & np.isfinite(current_a)
     if np.count_nonzero(valid) < 2:
-        return {"slope_a_per_v": np.nan, "intercept_a": np.nan, "r2": np.nan, "point_count": int(np.count_nonzero(valid))}
-    slope, intercept = np.polyfit(x[valid], y[valid], 1)
-    pred = slope * x[valid] + intercept
-    ss_res = float(np.sum((y[valid] - pred) ** 2))
-    ss_tot = float(np.sum((y[valid] - np.mean(y[valid])) ** 2))
+        return {
+            "resistance_ohm": np.nan,
+            "intercept_v": np.nan,
+            "r2": np.nan,
+            "point_count": int(np.count_nonzero(valid)),
+        }
+
+    current_valid = current_a[valid]
+    voltage_valid = voltage[valid]
+    resistance, intercept = np.polyfit(current_valid, voltage_valid, 1)
+    pred = resistance * current_valid + intercept
+    ss_res = float(np.sum((voltage_valid - pred) ** 2))
+    ss_tot = float(np.sum((voltage_valid - np.mean(voltage_valid)) ** 2))
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
-    resistance = 1.0 / slope if abs(slope) > 1e-15 else np.nan
     return {
-        "slope_a_per_v": float(slope),
-        "intercept_a": float(intercept),
+        "resistance_ohm": float(resistance),
+        "intercept_v": float(intercept),
         "r2": float(r2),
-        "resistance_ohm_from_slope": float(resistance),
         "point_count": int(np.count_nonzero(valid)),
     }
 
 
-def scan_target_heater(
+def scan_switch_mzi(
     *,
     mcv,
-    target_label,
-    target_port,
-    other_heaters,
-    other_voltage_v,
+    mzi_id,
+    port,
     voltage_points,
     settle_s,
     current_retries,
     current_retry_delay_s,
     voltage_limit_v,
-    scenario_name,
-    out_dir,
     dry_run,
 ):
     working_data = cu.generate_working_data()
     zero_all(working_data)
-    for info in other_heaters:
-        set_port_voltage(working_data, info["port"], other_voltage_v)
-
     rows = []
-    for idx, voltage_v in enumerate(voltage_points):
-        set_port_voltage(working_data, target_port, voltage_v)
+
+    for point_index, voltage_v in enumerate(voltage_points):
+        zero_all(working_data)
+        set_port_voltage(working_data, port, voltage_v)
         if dry_run:
-            current_a = np.nan
+            current_mA = np.nan
             attempts = 0
             warning = "dry_run"
         else:
-            upload_checked(mcv, working_data, voltage_limit_v, f"{scenario_name} point {idx}: {target_label}={voltage_v:.3f} V")
+            upload_checked(mcv, working_data, voltage_limit_v, f"MZI {mzi_id} port {port} point {point_index}")
             time.sleep(float(settle_s))
-            current_a, attempts, warning = read_current_port_retry(
+            current_mA, attempts, warning = read_current_port_retry(
                 mcv,
-                target_port,
+                port,
                 retries=current_retries,
                 delay_s=current_retry_delay_s,
             )
+
         rows.append(
             {
-                "scenario": scenario_name,
-                "point_index": int(idx),
-                "target_heater": target_label,
-                "target_port": int(target_port),
-                "target_voltage_v": float(voltage_v),
-                "target_current_a": "" if current_a is None else current_a,
-                "other_second_column_voltage_v": float(other_voltage_v),
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "MZI": int(mzi_id),
+                "PORT": int(port),
+                "point_index": int(point_index),
+                "voltage_v": float(voltage_v),
+                "current_mA": "" if current_mA is None else current_mA,
                 "current_read_attempts": int(attempts),
                 "warning": warning,
-                "timestamp": datetime.now().isoformat(timespec="microseconds"),
             }
         )
-    df = pd.DataFrame(rows)
-    df.to_csv(out_dir / f"{scenario_name}.csv", index=False)
-    return df
+
+    return pd.DataFrame(rows)
 
 
-def plot_comparison(df_zero, df_bias, fit_zero, fit_bias, target_label, out_path):
-    x_zero = pd.to_numeric(df_zero["target_voltage_v"], errors="coerce").to_numpy(dtype=float)
-    y_zero = pd.to_numeric(df_zero["target_current_a"], errors="coerce").to_numpy(dtype=float)
-    x_bias = pd.to_numeric(df_bias["target_voltage_v"], errors="coerce").to_numpy(dtype=float)
-    y_bias = pd.to_numeric(df_bias["target_current_a"], errors="coerce").to_numpy(dtype=float)
+def plot_fit(raw_df, fit_row, out_path):
+    voltage = pd.to_numeric(raw_df["voltage_v"], errors="coerce").to_numpy(dtype=float)
+    current_mA = pd.to_numeric(raw_df["current_mA"], errors="coerce").to_numpy(dtype=float)
+    current_a = current_mA * 1e-3
+    valid = np.isfinite(voltage) & np.isfinite(current_a)
 
-    slope_delta = fit_bias["slope_a_per_v"] - fit_zero["slope_a_per_v"]
-    intercept_delta = fit_bias["intercept_a"] - fit_zero["intercept_a"]
-    slope_rel = slope_delta / fit_zero["slope_a_per_v"] if abs(fit_zero["slope_a_per_v"]) > 1e-15 else np.nan
-    intercept_rel = intercept_delta / fit_zero["intercept_a"] if abs(fit_zero["intercept_a"]) > 1e-15 else np.nan
-
-    fig, ax = plt.subplots(figsize=(8.5, 5.2))
-    label_zero = (
-        "others 0 V: "
-        f"slope={fit_zero['slope_a_per_v']:.6g} A/V, "
-        f"b={fit_zero['intercept_a']:.6g} A"
-    )
-    label_bias = (
-        "others 3 V: "
-        f"slope={fit_bias['slope_a_per_v']:.6g} A/V, "
-        f"b={fit_bias['intercept_a']:.6g} A"
-    )
-    ax.plot(x_zero, y_zero, "o-", label=label_zero)
-    ax.plot(x_bias, y_bias, "s-", label=label_bias)
-    text = (
-        "bias - zero\n"
-        f"Delta slope = {slope_delta:.6g} A/V ({slope_rel:.3%})\n"
-        f"Delta intercept = {intercept_delta:.6g} A ({intercept_rel:.3%})"
-    )
-    ax.text(0.02, 0.98, text, transform=ax.transAxes, va="top", ha="left", bbox={"facecolor": "white", "alpha": 0.85})
-    ax.set_title(f"{target_label} voltage-current curve")
-    ax.set_xlabel("6d voltage (V)")
-    ax.set_ylabel("6d current reading (A)")
+    fig, ax = plt.subplots(figsize=(7.5, 4.8))
+    ax.plot(current_a[valid], voltage[valid], "o", label="measured")
+    if np.count_nonzero(valid) >= 2 and np.isfinite(fit_row["resistance_ohm"]):
+        x = np.linspace(float(np.min(current_a[valid])), float(np.max(current_a[valid])), 100)
+        y = fit_row["resistance_ohm"] * x + fit_row["intercept_v"]
+        ax.plot(x, y, "-", label=f"fit R={fit_row['resistance_ohm']:.3f} ohm")
+    ax.set_title(f"Switch MZI {int(fit_row['MZI'])} port {int(fit_row['PORT'])}")
+    ax.set_xlabel("Current (A)")
+    ax.set_ylabel("Voltage (V)")
     ax.grid(True, alpha=0.35)
-    ax.legend(loc="lower right", fontsize=8)
+    ax.legend()
     fig.tight_layout()
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
 
 
+def update_in_mzi_resistance_column(in_mzi_path, resistance_by_mzi):
+    table = load_switch_mzis(in_mzi_path)
+    if RESISTANCE_COLUMN in table.columns:
+        existing = pd.to_numeric(table[RESISTANCE_COLUMN], errors="coerce")
+    else:
+        existing = pd.Series([np.nan] * len(table), index=table.index)
+    table[RESISTANCE_COLUMN] = [
+        resistance_by_mzi.get(int(mzi), existing.iloc[idx])
+        for idx, mzi in enumerate(table["MZI"])
+    ]
+    table.to_csv(in_mzi_path, index=False)
+
+
+def parse_mzi_filter(value):
+    if value is None or str(value).strip() == "":
+        return None
+    return {int(item.strip()) for item in str(value).split(",") if item.strip()}
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Second-column heater resistance comparison scan.")
-    parser.add_argument("--target_heater", default=DEFAULT_TARGET_HEATER)
-    parser.add_argument("--mzi_table", default=DEFAULT_MZI_TABLE)
-    parser.add_argument("--out_root", default=DEFAULT_OUT_ROOT)
-    parser.add_argument("--ser_address", default=DEFAULT_SER_ADDRESS)
-    parser.add_argument("--start_v", type=float, default=0.0)
-    parser.add_argument("--stop_v", type=float, default=5.5)
-    parser.add_argument("--step_v", type=float, default=0.1)
-    parser.add_argument("--other_bias_v", type=float, default=3.0)
-    parser.add_argument("--settle_s", type=float, default=0.2)
-    parser.add_argument("--current_retries", type=int, default=10)
-    parser.add_argument("--current_retry_delay_s", type=float, default=0.2)
-    parser.add_argument("--voltage_limit_v", type=float, default=5.5)
-    parser.add_argument("--dry_run", type=parse_bool, default=True)
-    parser.add_argument("--confirm_hardware", type=parse_bool, default=False)
-    parser.add_argument("--restore_zero", type=parse_bool, default=True)
+    parser = argparse.ArgumentParser(description="Measure heater resistance for switch MZIs listed in IN_MZI.txt.")
+    parser.add_argument("--in-mzi", default=DEFAULT_IN_MZI)
+    parser.add_argument("--mzi-filter", default="", help="Comma-separated MZI ids to measure, e.g. 1 or 1,3,8.")
+    parser.add_argument("--out-root", default=DEFAULT_OUT_ROOT)
+    parser.add_argument("--ser-address", default=DEFAULT_SER_ADDRESS)
+    parser.add_argument("--start-v", type=float, default=0.5)
+    parser.add_argument("--stop-v", type=float, default=2.5)
+    parser.add_argument("--step-v", type=float, default=0.5)
+    parser.add_argument("--settle-s", type=float, default=0.2)
+    parser.add_argument("--current-retries", type=int, default=10)
+    parser.add_argument("--current-retry-delay-s", type=float, default=0.2)
+    parser.add_argument("--voltage-limit-v", type=float, default=5.5)
+    parser.add_argument("--dry-run", type=parse_bool, default=True)
+    parser.add_argument("--confirm-hardware", type=parse_bool, default=False)
+    parser.add_argument("--update-in-mzi", type=parse_bool, default=True)
+    parser.add_argument("--restore-zero", type=parse_bool, default=True)
     args = parser.parse_args()
 
     if not args.dry_run and not args.confirm_hardware:
-        raise RuntimeError("Refusing hardware write: set --confirm_hardware true with --dry_run false.")
+        raise RuntimeError("Refusing hardware write: set --confirm-hardware true with --dry-run false.")
 
-    heaters = load_second_column_heaters(args.mzi_table)
-    target_label = str(args.target_heater).strip().lower()
-    if target_label not in heaters:
-        raise ValueError(f"{target_label} not found in second-column heaters: {sorted(heaters)}")
-    target_info = heaters[target_label]
-    other_heaters = [info for label, info in heaters.items() if label != target_label]
+    switch_table = load_switch_mzis(args.in_mzi)
+    mzi_filter = parse_mzi_filter(args.mzi_filter)
+    if mzi_filter is not None:
+        known = set(int(x) for x in switch_table["MZI"])
+        unknown = sorted(mzi_filter.difference(known))
+        if unknown:
+            raise ValueError(f"--mzi-filter contains MZI ids not in {args.in_mzi}: {unknown}")
+        switch_table = switch_table[switch_table["MZI"].isin(mzi_filter)].copy()
+        if switch_table.empty:
+            raise ValueError("--mzi-filter selected no rows.")
     voltage_points = build_voltage_points(args.start_v, args.stop_v, args.step_v)
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(args.out_root) / f"run_{timestamp}_{target_label}"
+    out_dir = Path(args.out_root) / f"switch_mzi_run_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=False)
+
     config = {
         **vars(args),
-        "target_port": target_info["port"],
-        "second_column_heaters": heaters,
+        "selected_mzis": sorted(mzi_filter) if mzi_filter is not None else "all",
         "voltage_points": [float(v) for v in voltage_points],
+        "switch_mzis": switch_table.to_dict(orient="records"),
     }
     with (out_dir / "config.json").open("w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
     mcv = None
+    raw_frames = []
+    summary_rows = []
     try:
         if not args.dry_run:
             mcv = cu.open_ser_connection(args.ser_address)
             if mcv is None:
                 raise RuntimeError(f"Failed to open serial port {args.ser_address}.")
 
-        df_zero = scan_target_heater(
-            mcv=mcv,
-            target_label=target_label,
-            target_port=target_info["port"],
-            other_heaters=other_heaters,
-            other_voltage_v=0.0,
-            voltage_points=voltage_points,
-            settle_s=args.settle_s,
-            current_retries=args.current_retries,
-            current_retry_delay_s=args.current_retry_delay_s,
-            voltage_limit_v=args.voltage_limit_v,
-            scenario_name="others_0v",
-            out_dir=out_dir,
-            dry_run=args.dry_run,
-        )
-        df_bias = scan_target_heater(
-            mcv=mcv,
-            target_label=target_label,
-            target_port=target_info["port"],
-            other_heaters=other_heaters,
-            other_voltage_v=args.other_bias_v,
-            voltage_points=voltage_points,
-            settle_s=args.settle_s,
-            current_retries=args.current_retries,
-            current_retry_delay_s=args.current_retry_delay_s,
-            voltage_limit_v=args.voltage_limit_v,
-            scenario_name="others_3v",
-            out_dir=out_dir,
-            dry_run=args.dry_run,
-        )
+        for _, row in switch_table.iterrows():
+            mzi_id = int(row["MZI"])
+            port = int(row["PORT"])
+            print(f"[heater_resistance_test] scan switch MZI {mzi_id}, port {port}")
+            raw_df = scan_switch_mzi(
+                mcv=mcv,
+                mzi_id=mzi_id,
+                port=port,
+                voltage_points=voltage_points,
+                settle_s=args.settle_s,
+                current_retries=args.current_retries,
+                current_retry_delay_s=args.current_retry_delay_s,
+                voltage_limit_v=args.voltage_limit_v,
+                dry_run=args.dry_run,
+            )
+            raw_frames.append(raw_df)
+            raw_df.to_csv(out_dir / f"switch_mzi_{mzi_id}_port_{port}.csv", index=False)
+
+            fit = fit_resistance(raw_df["voltage_v"], pd.to_numeric(raw_df["current_mA"], errors="coerce"))
+            summary_row = {
+                "MZI": mzi_id,
+                "PORT": port,
+                "ON": float(row["ON"]),
+                "OFF": float(row["OFF"]),
+                **fit,
+            }
+            summary_rows.append(summary_row)
+            plot_fit(raw_df, summary_row, out_dir / f"switch_mzi_{mzi_id}_fit.png")
+            print(
+                f"[heater_resistance_test] MZI {mzi_id}, port {port}, "
+                f"R={summary_row['resistance_ohm']:.6g} ohm, r2={summary_row['r2']:.6g}"
+            )
     finally:
         if mcv is not None and args.restore_zero:
             try:
@@ -308,22 +316,22 @@ def main():
             if callable(close):
                 close()
 
-    fit_zero = fit_line(df_zero["target_voltage_v"], pd.to_numeric(df_zero["target_current_a"], errors="coerce"))
-    fit_bias = fit_line(df_bias["target_voltage_v"], pd.to_numeric(df_bias["target_current_a"], errors="coerce"))
-    fit_summary = {
-        "target_heater": target_label,
-        "target_port": target_info["port"],
-        "target_reference_resistance_ohm": target_info.get("resistance_ohm"),
-        "others_0v": fit_zero,
-        "others_3v": fit_bias,
-        "bias_minus_zero": {
-            "slope_delta_a_per_v": fit_bias["slope_a_per_v"] - fit_zero["slope_a_per_v"],
-            "intercept_delta_a": fit_bias["intercept_a"] - fit_zero["intercept_a"],
-        },
+    all_raw = pd.concat(raw_frames, ignore_index=True) if raw_frames else pd.DataFrame()
+    all_raw.to_csv(out_dir / "all_measurements.csv", index=False)
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df.to_csv(out_dir / "switch_mzi_resistance_summary.csv", index=False)
+
+    resistance_by_mzi = {
+        int(row["MZI"]): float(row["resistance_ohm"])
+        for row in summary_rows
+        if np.isfinite(float(row["resistance_ohm"]))
     }
-    with (out_dir / "fit_summary.json").open("w", encoding="utf-8") as f:
-        json.dump(fit_summary, f, indent=2)
-    plot_comparison(df_zero, df_bias, fit_zero, fit_bias, target_label, out_dir / "voltage_current_comparison.png")
+    if args.update_in_mzi and not args.dry_run:
+        update_in_mzi_resistance_column(args.in_mzi, resistance_by_mzi)
+        print(f"[heater_resistance_test] updated {args.in_mzi} column {RESISTANCE_COLUMN}")
+    elif args.update_in_mzi:
+        print("[heater_resistance_test] dry-run: IN_MZI.txt not updated.")
+
     print(f"[heater_resistance_test] saved results to {out_dir}")
 
 

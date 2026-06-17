@@ -13,6 +13,22 @@ init(autoreset=True)
 BASE_DIR = Path(__file__).resolve().parent
 VOLTAGE_FILE = BASE_DIR / "VOLTAGE.csv"
 CHANNEL_NUM = 128
+UPLOAD_VOLTAGE_FAILURE_LOG_PATH = None
+
+
+def set_upload_voltage_failure_log_path(path):
+    global UPLOAD_VOLTAGE_FAILURE_LOG_PATH
+    UPLOAD_VOLTAGE_FAILURE_LOG_PATH = None if path is None else os.fspath(path)
+
+
+def append_upload_voltage_failure_log(rows):
+    if not UPLOAD_VOLTAGE_FAILURE_LOG_PATH or not rows:
+        return
+    log_dir = os.path.dirname(UPLOAD_VOLTAGE_FAILURE_LOG_PATH)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    exists = os.path.exists(UPLOAD_VOLTAGE_FAILURE_LOG_PATH)
+    pd.DataFrame(rows).to_csv(UPLOAD_VOLTAGE_FAILURE_LOG_PATH, mode="a", index=False, header=not exists)
 
 
 def crc8(data):
@@ -110,6 +126,9 @@ def upload_voltage(ser, voltage_df):
     voltages = [(float(voltage_df.at[i, 0]) / 24 + 0.5) * 65535 for i in range(CHANNEL_NUM)]
     commands = generate_voltage_commands(voltages)
 
+    upload_ok = False
+    current_list = [None] * CHANNEL_NUM
+    check_currents = []
     for attempt in range(10):
         for cmd in commands:
             ser.write(bytes.fromhex(cmd))
@@ -119,13 +138,39 @@ def upload_voltage(ser, voltage_df):
         if all(val is not None for val in check_currents) and all(val > 0.01 for val in check_currents):
             # print("所有数值均大于0.01且在精度范围内，即将跳出循环！")
             # print(check_currents)
+            upload_ok = True
             break
 
     time.sleep(0.5)
-    if attempt < 9:
+    if upload_ok:
         print(Fore.GREEN + "成功上传电压数据!")
     else:
         print(Fore.RED + "上传电压数据失败，超出上传尝试次数!")
+        bad_rows = []
+        for idx in check_channel_index:
+            voltage = float(voltage_df.at[idx, 0])
+            current = current_list[idx] if idx < len(current_list) else None
+            if current is None or current <= 0.01:
+                bad_rows.append(
+                    {
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "port": idx + 1,
+                        "voltage": voltage,
+                        "current_mA": current,
+                        "threshold_mA": 0.01,
+                        "attempts": 10,
+                    }
+                )
+        if bad_rows:
+            print(Fore.RED + f"上传失败通道数量: {len(bad_rows)}")
+            for row in bad_rows:
+                current_text = "None" if row["current_mA"] is None else f"{row['current_mA']:.6f}"
+                print(
+                    Fore.RED
+                    + f"  port {row['port']}: V={row['voltage']:.6f} V, "
+                    + f"I={current_text} mA, required > {row['threshold_mA']} mA"
+                )
+            append_upload_voltage_failure_log(bad_rows)
 
 
 def clearallvoltage(ser):
