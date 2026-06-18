@@ -119,7 +119,12 @@ def upload_voltage(ser, voltage_df):
     """
     # 使用传入的 DataFrame 对象，不再进行文件 I/O 操作
     # 找出存在非零电压设置的通道索引
-    check_channel_index = voltage_df.index[voltage_df[0] != 0].tolist()
+    min_current_check_voltage = 0.5
+    min_upload_current_mA = 0.01
+    # Ignore tiny non-zero voltages during upload-current validation. These
+    # near-zero bias values can legitimately read as zero or negative current,
+    # and treating them as upload failures creates false alarms.
+    check_channel_index = voltage_df.index[voltage_df[0].abs() >= min_current_check_voltage].tolist()
 
     # 计算公式： (v / 24 + 0.5) * 65535
     # CHANNEL_NUM 为 128（确保该变量在模块内有定义或引入）
@@ -135,7 +140,7 @@ def upload_voltage(ser, voltage_df):
         time.sleep(0.5)
         current_list = read_current(ser)
         check_currents = [current_list[idx] for idx in check_channel_index]
-        if all(val is not None for val in check_currents) and all(val > 0.01 for val in check_currents):
+        if all(val is not None for val in check_currents) and all(val > min_upload_current_mA for val in check_currents):
             # print("所有数值均大于0.01且在精度范围内，即将跳出循环！")
             # print(check_currents)
             upload_ok = True
@@ -150,14 +155,15 @@ def upload_voltage(ser, voltage_df):
         for idx in check_channel_index:
             voltage = float(voltage_df.at[idx, 0])
             current = current_list[idx] if idx < len(current_list) else None
-            if current is None or current <= 0.01:
+            if current is None or current <= min_upload_current_mA:
                 bad_rows.append(
                     {
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "port": idx + 1,
                         "voltage": voltage,
                         "current_mA": current,
-                        "threshold_mA": 0.01,
+                        "threshold_mA": min_upload_current_mA,
+                        "min_check_voltage": min_current_check_voltage,
                         "attempts": 10,
                     }
                 )

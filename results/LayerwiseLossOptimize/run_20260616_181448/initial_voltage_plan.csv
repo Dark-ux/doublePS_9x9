@@ -23,3 +23,11 @@ mzi_id,layer,arm_index,port,base_voltage,base_phase,target_phase,phase_offset,in
 15,4,1,17,3.732,0.0,0.0,0.0,3.732,inter_cali_pair_pi0_prebiased
 16,4,0,22,5.086,3.141592653589793,3.141592653589793,0.0,5.086,inter_cali_pair_pi0_prebiased
 16,4,1,18,3.21,0.0,0.0,0.0,3.21,inter_cali_pair_pi0_prebiased
+17,5,0,84,4.004,3.141592653589793,1.0471975511965976,-2.0943951023931957,3.1833320976251884,mzi_table_upper_bar_lower_zero_pi0_prebiased_fallback
+17,5,1,80,0.0,0.0,0.0,0.0,0.0,mzi_table_upper_bar_lower_zero_pi0_prebiased_fallback
+18,5,0,83,3.623,3.141592653589793,1.0471975511965976,-2.0943951023931957,2.68111631066767,inter_cali_pair_pi0_prebiased
+18,5,1,79,3.574,0.0,0.0,0.0,3.574,inter_cali_pair_pi0_prebiased
+19,5,0,82,3.458,3.141592653589793,1.0471975511965976,-2.0943951023931957,2.453898177782662,inter_cali_pair_pi0_prebiased
+19,5,1,78,3.443,0.0,0.0,0.0,3.443,inter_cali_pair_pi0_prebiased
+20,5,0,81,3.345,3.141592653589793,1.0471975511965976,-2.0943951023931957,2.294157842958717,inter_cali_pair_pi0_prebiased
+20,5,1,77,3.469,0.0,0.0,0.0,3.469,inter_cali_pair_pi0_prebiased

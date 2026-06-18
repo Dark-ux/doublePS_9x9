@@ -3,6 +3,7 @@ import builtins
 import csv
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -535,6 +536,38 @@ def create_run_dir(out_dir):
     return run_dir
 
 
+def load_voltage_state(path, working_data):
+    state = pd.read_csv(path)
+    if "voltage" in state.columns:
+        values = state["voltage"].to_numpy(dtype=float)
+    else:
+        values = state.iloc[:, -1].to_numpy(dtype=float)
+    if len(values) > len(working_data):
+        raise ValueError(f"resume voltage file has {len(values)} rows, working_data has {len(working_data)} rows")
+    working_data.iloc[: len(values), 0] = values
+    return working_data
+
+
+def infer_resume_position(voltage_file):
+    name = Path(voltage_file).name
+    match = re.search(r"voltage_state_layer(\d+)_iter(\d+)\.csv$", name)
+    if not match:
+        return None, None
+    return int(match.group(1)) - 1, int(match.group(2))
+
+
+def infer_next_measure_count(run_dir):
+    figure_dir = Path(run_dir) / "power_matrix_figures"
+    if not figure_dir.exists():
+        return 0
+    max_idx = -1
+    for path in figure_dir.glob("measure_*_*.png"):
+        match = re.match(r"measure_(\d+)_", path.name)
+        if match:
+            max_idx = max(max_idx, int(match.group(1)))
+    return max_idx + 1
+
+
 def append_layer_summary(run_dir, row):
     write_rows(
         run_dir / "layer_summary.csv",
@@ -598,6 +631,49 @@ def append_heater_update_log(run_dir, rows):
             "lr_used",
         ],
     )
+
+
+def load_previous_layer_gradients(run_dir, layer_1based, prior_iter):
+    path = Path(run_dir) / "heater_update_log.csv"
+    if prior_iter < 0 or not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except (OSError, pd.errors.EmptyDataError):
+        return {}
+    required = {"current_layer", "layer_iter", "heater_label", "gradient"}
+    if not required.issubset(df.columns):
+        return {}
+    rows = df[
+        (pd.to_numeric(df["current_layer"], errors="coerce") == int(layer_1based))
+        & (pd.to_numeric(df["layer_iter"], errors="coerce") == int(prior_iter))
+    ]
+    if rows.empty:
+        return {}
+    gradients = {}
+    for _, row in rows.iterrows():
+        try:
+            gradients[str(row["heater_label"])] = float(row["gradient"])
+        except (TypeError, ValueError):
+            continue
+    return gradients
+
+
+def order_heaters_for_iteration(active_heaters, previous_grad_by_label, strategy):
+    strategy = str(strategy).strip().lower()
+    if strategy in {"sequential", "fixed"} or not previous_grad_by_label:
+        return list(active_heaters), "sequential"
+    if strategy not in {"gradient", "gradient-after-first", "previous-gradient"}:
+        raise ValueError(f"Unsupported heater order strategy: {strategy}")
+    original_index = {heater["label"]: idx for idx, heater in enumerate(active_heaters)}
+    ordered = sorted(
+        active_heaters,
+        key=lambda heater: (
+            -abs(float(previous_grad_by_label.get(heater["label"], 0.0))),
+            original_index[heater["label"]],
+        ),
+    )
+    return ordered, "previous_gradient_abs_desc"
 
 
 def initialize_working_data(args, mzi_table, cm):
@@ -670,19 +746,33 @@ def save_initial_voltage_records(run_dir, records):
     pd.DataFrame(records).to_csv(path, mode="a", index=False, header=not exists)
 
 
-def optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_thetas, run_dir):
+def optimize_one_layer(
+    args,
+    working_data,
+    cm,
+    layer_index,
+    mzi_table,
+    target_thetas,
+    run_dir,
+    start_iter=0,
+    initialize_layer=True,
+):
     args.current_layer_index = int(layer_index)
-    set_layers_after_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
-    init_records = set_layer_to_target_prebiased_pair(
-        working_data,
-        cm,
-        layer_index,
-        mzi_table,
-        args.inter_cali_pairs_data,
-        target_thetas,
-        args.v_min,
-        args.v_max,
-    )
+    if initialize_layer:
+        set_layers_after_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
+        init_records = set_layer_to_target_prebiased_pair(
+            working_data,
+            cm,
+            layer_index,
+            mzi_table,
+            args.inter_cali_pairs_data,
+            target_thetas,
+            args.v_min,
+            args.v_max,
+        )
+    else:
+        validate_all_voltages(working_data, args.v_min, args.v_max)
+        init_records = []
     save_initial_voltage_records(run_dir, init_records)
 
     active_mzi_ids = get_layer_mzi_ids(cm, layer_index)
@@ -693,23 +783,31 @@ def optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_th
 
     print(f"Optimizing layer {layer_index + 1}: MZI ids {active_mzi_ids}")
     print(f"Active heaters: {active_heaters}")
-    print("Initial active-layer voltages:")
-    for rec in init_records:
-        print(
-            f"  MZI{rec['mzi_id']}_arm{rec['arm_index']} port {rec['port']}: "
-            f"{rec['base_voltage']:.3f} V -> {rec['initial_voltage']:.3f} V "
-            f"(base_phase={rec.get('base_phase', 0.0):.6g}, "
-            f"target_phase={rec['target_phase']:.6g}, "
-            f"phase_offset={rec.get('phase_offset', 0.0):.6g}, {rec['mode']})"
-        )
+    if initialize_layer:
+        print("Initial active-layer voltages:")
+        for rec in init_records:
+            print(
+                f"  MZI{rec['mzi_id']}_arm{rec['arm_index']} port {rec['port']}: "
+                f"{rec['base_voltage']:.3f} V -> {rec['initial_voltage']:.3f} V "
+                f"(base_phase={rec.get('base_phase', 0.0):.6g}, "
+                f"target_phase={rec['target_phase']:.6g}, "
+                f"phase_offset={rec.get('phase_offset', 0.0):.6g}, {rec['mode']})"
+            )
+    else:
+        print(f"Resuming layer {layer_index + 1} from existing voltage state at iter {int(start_iter)}.")
 
     prev_loss = None
     final_loss = None
     final_power = None
     iterations_completed = 0
     layer_start_loss = None
+    previous_grad_by_label = load_previous_layer_gradients(
+        run_dir,
+        layer_index + 1,
+        int(start_iter) - 1,
+    )
 
-    for iter_idx in range(args.max_iter):
+    for iter_idx in range(int(start_iter), args.max_iter):
         args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_baseline"
         P_current = measure_power_matrix(args, working_data)
         loss = power_matrix_loss(P_current, P_target)
@@ -724,14 +822,25 @@ def optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_th
         accepted_any = False
         rejected_any = False
         lr_values = []
+        iteration_heaters, heater_order_mode = order_heaters_for_iteration(
+            active_heaters,
+            previous_grad_by_label,
+            args.heater_order_strategy,
+        )
+        print(
+            f"Layer {layer_index + 1} iter {iter_idx:03d} heater order "
+            f"({heater_order_mode}): {', '.join(h['label'] for h in iteration_heaters)}"
+        )
+        current_grad_by_label = {}
 
-        for heater in active_heaters:
+        for heater in iteration_heaters:
             heater_loss_before = current_loss
             heater_before = get_heater_voltages(working_data, [heater])
             args.measure_context_prefix = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}"
             grad, _ = finite_difference_gradient(args, working_data, [heater], heater_before, P_target)
             grad_value = float(grad[0]) if grad.size else 0.0
             grad_values.append(grad_value)
+            current_grad_by_label[heater["label"]] = grad_value
 
             accepted = True
             rejected = False
@@ -815,6 +924,7 @@ def optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_th
         )
         append_heater_update_log(run_dir, heater_rows)
         iterations_completed += 1
+        previous_grad_by_label = current_grad_by_label
 
         print(
             f"layer={layer_index + 1}, iter={iter_idx:03d}, loss={loss:.6g}, "
@@ -867,9 +977,36 @@ def run_optimization(args):
     um.BW = um.load_bw_phases(args.bw_dir, expected_count=(args.N - 3) // 2)
     args.hardware = maybe_initialize_hardware(args)
 
-    run_dir = create_run_dir(args.out_dir)
+    resume_enabled = bool(args.resume_run_dir or args.resume_voltage_file)
+    if resume_enabled and not (args.resume_run_dir and args.resume_voltage_file):
+        raise ValueError("--resume-run-dir and --resume-voltage-file must be provided together.")
+    resume_layer_index = None
+    resume_iter = None
+
+    if resume_enabled:
+        run_dir = Path(args.resume_run_dir)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"resume run dir not found: {run_dir}")
+        if not Path(args.resume_voltage_file).exists():
+            raise FileNotFoundError(f"resume voltage file not found: {args.resume_voltage_file}")
+        inferred_layer, inferred_iter = infer_resume_position(args.resume_voltage_file)
+        resume_layer_index = int(args.resume_layer) - 1 if args.resume_layer is not None else inferred_layer
+        resume_iter = int(args.resume_iter) if args.resume_iter is not None else inferred_iter
+        if resume_layer_index is None or resume_iter is None:
+            raise ValueError(
+                "Could not infer resume layer/iter from --resume-voltage-file; "
+                "set --resume-layer and --resume-iter explicitly."
+            )
+        if resume_layer_index < 0 or resume_layer_index > args.layer_index:
+            raise ValueError(
+                f"resume layer must be in [1, {args.layer}], got {resume_layer_index + 1}"
+            )
+        if resume_iter < 0:
+            raise ValueError("--resume-iter must be >= 0")
+    else:
+        run_dir = create_run_dir(args.out_dir)
     args.run_dir = run_dir
-    args.measure_count = 0
+    args.measure_count = infer_next_measure_count(run_dir) if resume_enabled else 0
     cu.set_upload_voltage_failure_log_path(run_dir / "upload_voltage_failure_log.csv")
 
     config = vars(args).copy()
@@ -889,23 +1026,48 @@ def run_optimization(args):
         config.pop(key, None)
     config["layer_index_0based"] = args.layer_index
     config["layer_semantics"] = "optimize_from_all_bar_through_target_layer"
-    with open(run_dir / "config.json", "w", encoding="utf-8") as f:
+    resume_stamp = datetime.now().strftime("%Y%m%d_%H%M%S") if resume_enabled else None
+    if resume_enabled:
+        config["resume_layer_index_0based"] = resume_layer_index
+        config["resume_iter"] = resume_iter
+        config["resume_target_layer"] = int(args.layer)
+        config_path = run_dir / f"resume_config_{resume_stamp}.json"
+    else:
+        config_path = run_dir / "config.json"
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
-    np.savetxt(run_dir / "target_thetas_used.csv", target_thetas, delimiter=",", header="theta1,theta2", comments="")
+    target_thetas_path = (
+        run_dir / f"target_thetas_used_resume_{resume_stamp}.csv"
+        if resume_enabled
+        else run_dir / "target_thetas_used.csv"
+    )
+    np.savetxt(target_thetas_path, target_thetas, delimiter=",", header="theta1,theta2", comments="")
 
     print("Layerwise loss optimization")
     print(f"Target layer: {args.layer} (0-based column {args.layer_index}); process layers 1..{args.layer}")
     print(f"Voltage range: [{args.v_min}, {args.v_max}], delta_v={args.delta_v}, lr={args.lr}")
     print(f"dry_run={args.dry_run}, confirm_hardware={args.confirm_hardware}")
     print(f"Run dir: {run_dir}")
+    if resume_enabled:
+        print(
+            f"Resume enabled: voltage_file={args.resume_voltage_file}, "
+            f"layer={resume_layer_index + 1}, iter={resume_iter}, next_measure={args.measure_count}"
+        )
 
     working_data = cu.generate_working_data()
-    set_all_mzis_to_bar(working_data, cm, mzi_table, args.v_min, args.v_max)
+    if resume_enabled:
+        load_voltage_state(args.resume_voltage_file, working_data)
+    else:
+        set_all_mzis_to_bar(working_data, cm, mzi_table, args.v_min, args.v_max)
     validate_all_voltages(working_data, args.v_min, args.v_max)
     final_power = None
     final_loss = None
 
     for layer_index in range(0, args.layer_index + 1):
+        if resume_enabled and layer_index < resume_layer_index:
+            print(f"Resume: preserving completed layer {layer_index + 1}; no new logs written.")
+            continue
+
         if is_first_or_last_layer(layer_index, cm.shape[1]):
             set_layer_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
             set_layers_after_to_bar(working_data, cm, layer_index, mzi_table, args.v_min, args.v_max)
@@ -944,7 +1106,19 @@ def run_optimization(args):
             )
             continue
 
-        final_power, final_loss = optimize_one_layer(args, working_data, cm, layer_index, mzi_table, target_thetas, run_dir)
+        layer_start_iter = resume_iter if resume_enabled and layer_index == resume_layer_index else 0
+        initialize_layer = not (resume_enabled and layer_index == resume_layer_index)
+        final_power, final_loss = optimize_one_layer(
+            args,
+            working_data,
+            cm,
+            layer_index,
+            mzi_table,
+            target_thetas,
+            run_dir,
+            start_iter=layer_start_iter,
+            initialize_layer=initialize_layer,
+        )
 
     if final_power is None:
         args.active_heaters = []
@@ -991,8 +1165,18 @@ def build_arg_parser():
     parser.add_argument("--line-search", action="store_true")
     parser.add_argument("--line-search-shrink", type=positive_float, default=0.5)
     parser.add_argument("--line-search-min-lr", type=positive_float, default=1e-3)
+    parser.add_argument(
+        "--heater-order-strategy",
+        choices=["gradient-after-first", "sequential"],
+        default="gradient-after-first",
+        help="Heater update order inside each layer. gradient-after-first uses sequential order until prior gradients exist, then sorts by previous |gradient|.",
+    )
     parser.add_argument("--ser-address", default=DEFAULT_SER_ADDRESS)
     parser.add_argument("--opm2-address", default=DEFAULT_OPM2_ADDRESS)
+    parser.add_argument("--resume-run-dir", help="Existing run directory to append logs/results to when resuming.")
+    parser.add_argument("--resume-voltage-file", help="Voltage state CSV to load before resuming.")
+    parser.add_argument("--resume-layer", type=int, help="1-based layer to resume; inferred from voltage_state filename if omitted.")
+    parser.add_argument("--resume-iter", type=int, help="Layer iteration to resume; inferred from voltage_state filename if omitted.")
     return parser
 
 
@@ -1003,7 +1187,7 @@ def main():
         raise ValueError("--N must be >= 2")
     if args.v_min > args.v_max:
         raise ValueError("--v-min must be <= --v-max")
-    if args.init_mode != "bar":
+    if args.init_mode != "bar" and not (args.resume_run_dir or args.resume_voltage_file):
         raise RuntimeError("Resume/current initialization is disabled; every run must start from all-Bar.")
     if not args.dry_run and not args.confirm_hardware:
         raise RuntimeError("Refusing hardware access: set --confirm-hardware true with --dry-run false.")
