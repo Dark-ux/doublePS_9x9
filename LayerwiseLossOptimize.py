@@ -396,6 +396,15 @@ def power_matrix_loss(P_current, P_target, eps=1e-12):
     return float(np.sum(diff**2) / (np.sum(np.asarray(P_target, dtype=float) ** 2) + eps))
 
 
+def power_matrix_cosine_similarity(P_current, P_target, eps=1e-12):
+    current = np.asarray(P_current, dtype=float).ravel()
+    target = np.asarray(P_target, dtype=float).ravel()
+    denom = float(np.linalg.norm(current) * np.linalg.norm(target))
+    if denom <= eps:
+        return 0.0
+    return float(np.dot(current, target) / denom)
+
+
 def get_heater_voltages(working_data, active_heaters):
     return np.array([float(working_data.iloc[int(h["port"]) - 1, 0]) for h in active_heaters], dtype=float)
 
@@ -598,6 +607,8 @@ def append_multilayer_iter_log(run_dir, row):
             "layer_iter",
             "loss_before_iter",
             "loss_after_iter",
+            "cosine_before_iter",
+            "cosine_after_iter",
             "grad_norm",
             "max_abs_grad",
             "accepted",
@@ -811,6 +822,7 @@ def optimize_one_layer(
         args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_baseline"
         P_current = measure_power_matrix(args, working_data)
         loss = power_matrix_loss(P_current, P_target)
+        cosine_before_iter = power_matrix_cosine_similarity(P_current, P_target)
         if layer_start_loss is None:
             layer_start_loss = float(loss)
         np.savetxt(run_dir / f"P_current_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv", P_current, delimiter=",")
@@ -901,6 +913,7 @@ def optimize_one_layer(
         args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_final"
         final_power = measure_power_matrix(args, working_data)
         final_loss = power_matrix_loss(final_power, P_target)
+        cosine_after_iter = power_matrix_cosine_similarity(final_power, P_target)
         grad_array = np.asarray(grad_values, dtype=float)
         grad_norm = float(np.linalg.norm(grad_array))
         max_abs_grad = float(np.max(np.abs(grad_array))) if grad_array.size else 0.0
@@ -915,6 +928,8 @@ def optimize_one_layer(
                 "layer_iter": int(iter_idx),
                 "loss_before_iter": float(loss),
                 "loss_after_iter": float(final_loss),
+                "cosine_before_iter": float(cosine_before_iter),
+                "cosine_after_iter": float(cosine_after_iter),
                 "grad_norm": grad_norm,
                 "max_abs_grad": max_abs_grad,
                 "accepted": bool(accepted_any),
@@ -1097,6 +1112,8 @@ def run_optimization(args):
                     "layer_iter": "",
                     "loss_before_iter": "",
                     "loss_after_iter": "",
+                    "cosine_before_iter": "",
+                    "cosine_after_iter": "",
                     "grad_norm": "",
                     "max_abs_grad": "",
                     "accepted": "",
