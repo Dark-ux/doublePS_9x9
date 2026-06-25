@@ -1,0 +1,2 @@
+global_target_layer,current_layer,layer_status,skip_reason,start_loss,final_loss,iterations_completed,active_heater_labels,active_heater_ports
+9,1,skipped,first_or_last_layer_bar_fixed,,,0,,

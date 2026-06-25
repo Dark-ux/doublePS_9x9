@@ -393,7 +393,7 @@ def get_T(
     T = np.column_stack(cols)
 
     plt.figure(figsize=(6, 5))
-    plt.imshow(T, aspect="auto", origin="upper", cmap="viridis")
+    plt.imshow(T, aspect="auto", origin="upper", cmap="viridis", vmin=0.0, vmax=1.0)
     plt.yticks(range(T.shape[0]))
     plt.colorbar(label="Normalized power")
     plt.xlabel("Input channel")

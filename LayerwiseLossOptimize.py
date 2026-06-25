@@ -366,8 +366,11 @@ def measure_power_matrix(args, working_data):
     measure_context = str(getattr(args, "measure_context", "measurement"))
     figure_path = None
     if getattr(args, "run_dir", None) is not None:
-        figure_dir = Path(args.run_dir) / "power_matrix_figures"
-        figure_path = figure_dir / f"measure_{measure_idx:04d}_{measure_context}.png"
+        # Finite-difference plus/minus probes are numerous and only used to
+        # estimate gradients, so skip saving their heatmaps to reduce output.
+        if not measure_context.endswith(("_plus", "_minus")):
+            figure_dir = Path(args.run_dir) / "power_matrix_figures"
+            figure_path = figure_dir / f"measure_{measure_idx:04d}_{measure_context}.png"
         switch_current_log_path = Path(args.run_dir) / "switch_current_check_log.csv"
     else:
         switch_current_log_path = None
