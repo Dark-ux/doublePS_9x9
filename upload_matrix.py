@@ -848,26 +848,26 @@ if __name__ == "__main__":
     with open(inter_cali_pairs_path, "r", encoding="utf-8") as f:
         inter_cali_pairs = json.load(f)
 
-    for i in range(4, N * (N - 1) // 2 - 4):
-        mzi_id = str(i + 1)
-        pair_entry = inter_cali_pairs.get(mzi_id)
-        if not pair_entry:
-            print(f"Skip MZI {mzi_id}: no entry in {inter_cali_pairs_path}")
-            continue
+    # for i in range(4, N * (N - 1) // 2 - 4):
+    #     mzi_id = str(i + 1)
+    #     pair_entry = inter_cali_pairs.get(mzi_id)
+    #     if not pair_entry:
+    #         print(f"Skip MZI {mzi_id}: no entry in {inter_cali_pairs_path}")
+    #         continue
 
-        ports = pair_entry.get("ports", [])
-        if not isinstance(ports, list) or len(ports) != 2:
-            raise ValueError(f"MZI {mzi_id} in {inter_cali_pairs_path} must contain two ports.")
+    #     ports = pair_entry.get("ports", [])
+    #     if not isinstance(ports, list) or len(ports) != 2:
+    #         raise ValueError(f"MZI {mzi_id} in {inter_cali_pairs_path} must contain two ports.")
 
-        upper_v = float(pair_entry.get("upper_arm_voltage", 0.0))
-        lower_v = float(pair_entry.get("lower_arm_voltage", 0.0))
-        cu.write_port_voltage(int(ports[0]), upper_v, working_data)
-        cu.write_port_voltage(int(ports[1]), lower_v, working_data)
-        print(
-            f"Deploy inter_cali pair MZI {mzi_id}: "
-            f"port {int(ports[0])} -> {upper_v:.3f} V, "
-            f"port {int(ports[1])} -> {lower_v:.3f} V"
-        )
+    #     upper_v = float(pair_entry.get("upper_arm_voltage", 0.0))
+    #     lower_v = float(pair_entry.get("lower_arm_voltage", 0.0))
+    #     cu.write_port_voltage(int(ports[0]), upper_v, working_data)
+    #     cu.write_port_voltage(int(ports[1]), lower_v, working_data)
+    #     print(
+    #         f"Deploy inter_cali pair MZI {mzi_id}: "
+    #         f"port {int(ports[0])} -> {upper_v:.3f} V, "
+    #         f"port {int(ports[1])} -> {lower_v:.3f} V"
+    #     )
 
     upload_v_checked(mcv, working_data, v_min, v_max)
     base_working_data = working_data.copy(deep=True)
