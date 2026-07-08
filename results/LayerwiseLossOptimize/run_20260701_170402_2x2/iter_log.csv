@@ -1,0 +1,4 @@
+global_target_layer,current_layer,layer_status,skip_reason,layer_iter,loss_before_iter,loss_after_iter,cosine_before_iter,cosine_after_iter,grad_norm,max_abs_grad,accepted,rejected,lr_used
+2,1,skipped,first_or_last_layer_bar_fixed,,,,,,,,,,
+2,2,optimized,,0,0.006877383042708623,0.004264020770014596,0.9968018865577704,0.9986623239659035,6.762649132991423,6.7625172668719475,True,True,0.025
+2,2,optimized,,1,0.0042593904011562255,0.0041928641346988225,0.9986644936290996,0.998682557586745,0.028995956981596294,0.024730117622961022,True,True,0.025

@@ -1,0 +1,9 @@
+mzi_id,layer,arm_index,port,base_voltage,base_phase,target_phase,phase_offset,initial_voltage,mode
+5,2,0,11,3.404,3.141592653589793,1.0471975511965976,-2.0943951023931957,2.3715672471954217,inter_cali_pair_pi0_prebiased
+5,2,1,7,3.658,0.0,0.0,0.0,3.658,inter_cali_pair_pi0_prebiased
+6,2,0,12,3.497,3.141592653589793,3.141592653589793,0.0,3.497,inter_cali_pair_pi0_prebiased
+6,2,1,8,3.525,0.0,0.0,0.0,3.525,inter_cali_pair_pi0_prebiased
+7,2,0,13,3.273,3.141592653589793,3.141592653589793,0.0,3.273,inter_cali_pair_pi0_prebiased
+7,2,1,9,3.503,0.0,0.0,0.0,3.503,inter_cali_pair_pi0_prebiased
+8,2,0,14,5.095,3.141592653589793,3.141592653589793,0.0,5.095,inter_cali_pair_pi0_prebiased
+8,2,1,10,3.166,0.0,0.0,0.0,3.166,inter_cali_pair_pi0_prebiased

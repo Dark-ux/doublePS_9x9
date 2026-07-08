@@ -1,0 +1,5 @@
+global_target_layer,current_layer,layer_status,skip_reason,start_loss,final_loss,iterations_completed,active_heater_labels,active_heater_ports
+4,1,skipped,first_or_last_layer_bar_fixed,,,0,,
+4,2,optimized,,0.007411441113674604,0.004531171087230245,10,MZI5_arm0;MZI5_arm1;MZI6_arm0;MZI6_arm1;MZI7_arm0;MZI7_arm1;MZI8_arm0;MZI8_arm1,11;7;12;8;13;9;14;10
+4,3,optimized,,0.030061187505286448,0.005700266582356278,13,MZI9_arm0;MZI9_arm1;MZI10_arm0;MZI10_arm1;MZI11_arm0;MZI11_arm1;MZI12_arm0;MZI12_arm1,76;72;75;71;74;70;73;69
+4,4,optimized,,0.019730770474321396,0.014636472556926544,7,MZI13_arm0;MZI13_arm1;MZI14_arm0;MZI14_arm1;MZI15_arm0;MZI15_arm1;MZI16_arm0;MZI16_arm1,19;15;20;16;21;17;22;18
