@@ -1,0 +1,9 @@
+switch_mzi,port,input_reference_power_uw,chip_power_max_uw,reference_fraction_of_max,reference_reachable,scan_path
+1,43,120.0,235.49435890800004,0.5095663461173611,True,Scandata-backup-04\1Col\power_data\43.txt
+2,45,120.0,223.06960816999998,0.537948674337334,True,Scandata-backup-04\1Col\power_data\45.txt
+3,41,120.0,201.29802876300002,0.5961310239221619,True,Scandata-backup-04\1Col\power_data\41.txt
+4,48,120.0,170.659377764,0.7031550306361986,True,Scandata-backup-04\1Col\power_data\48.txt
+5,44,120.0,214.35042686399999,0.5598309355182064,True,Scandata-backup-04\1Col\power_data\44.txt
+6,46,120.0,196.0178851618,0.612189035204353,True,Scandata-backup-04\1Col\power_data\46.txt
+7,42,120.0,240.0497142738,0.49989645004587824,True,Scandata-backup-04\1Col\power_data\42.txt
+8,49,120.0,213.530873824,0.5619796231382841,True,Scandata-backup-04\1Col\power_data\49.txt

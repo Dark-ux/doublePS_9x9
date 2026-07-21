@@ -1,0 +1,42 @@
+{
+  "features_csv": "features_test.csv",
+  "sample_count": 20,
+  "feature_columns": [
+    "feature_0",
+    "feature_1",
+    "feature_2",
+    "feature_3",
+    "feature_4",
+    "feature_5",
+    "feature_6",
+    "feature_7"
+  ],
+  "invalid_feature_rows": 0,
+  "feature_sum_min": 0.9999998851179639,
+  "feature_sum_max": 1.0000001051811758,
+  "expected_input_power_rule": "expected_input_power_i = feature_i * 1.0",
+  "inference_voltage_file_not_loaded": "results\\LayerwiseLossOptimize\\run_20260716_224053\\final_voltage.csv",
+  "pass_through_voltage_file": "results\\MNISTInputPassThroughTest\\run_20260720_104412\\pass_through_voltage.csv",
+  "switch_voltage_safety_check_file": "results\\MNISTInputPassThroughTest\\run_20260720_104412\\switch_voltage_safety_check.csv",
+  "input_upload_mode": "scan-leak-inverse",
+  "switch_leak_scan_dir": "Scandata-backup-04\\1Col\\power_data",
+  "switch_leak_inverse_summary_file": "results\\MNISTInputPassThroughTest\\run_20260720_104412\\switch_leak_inverse_summary.csv",
+  "switch_leak_inverse_lookup_file": "results\\MNISTInputPassThroughTest\\run_20260720_104412\\switch_leak_inverse_lookup.csv",
+  "safe_voltage_range_v": [
+    0.0,
+    5.5
+  ],
+  "hardware_mode": true,
+  "switch_on_measured": true,
+  "route_identity_ok_count": 8,
+  "route_identity_total": 8,
+  "feature_samples_measured": true,
+  "sample_output_power_file": "results\\MNISTInputPassThroughTest\\run_20260720_104412\\sample_output_power_raw.csv",
+  "input_vector_comparison_file": "results\\MNISTInputPassThroughTest\\run_20260720_104412\\input_vector_comparison.csv",
+  "diag_feature_mae": 0.0596398163645647,
+  "diag_feature_max_abs_error": 0.4504307052230744,
+  "lstsq_feature_mae": 0.06774903617117202,
+  "lstsq_feature_max_abs_error": 0.495345484417561,
+  "output_power_mae_vs_csv_expected": 1.243545747612329e-05,
+  "output_power_max_abs_error_vs_csv_expected": 8.320942439124934e-05
+}
