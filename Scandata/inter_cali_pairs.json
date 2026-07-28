@@ -53,11 +53,11 @@
       75,
       71
     ],
-    "upper_arm_voltage": 4.293,
-    "lower_arm_voltage": 4.193,
-    "min_x_power": 0.034023513735886225,
-    "min_dp": 6.171777821307,
-    "min_power_uW": 2.116827
+    "upper_arm_voltage": 5.282,
+    "lower_arm_voltage": 4.972,
+    "min_x_power": 0.04784005584505835,
+    "min_dp": 8.5025936368,
+    "min_power_uW": 2.4178680000000004
   },
   "18": {
     "target": 18,
@@ -137,11 +137,11 @@
       74,
       70
     ],
-    "upper_arm_voltage": 4.149,
-    "lower_arm_voltage": 3.972,
-    "min_x_power": 0.030593490001013555,
-    "min_dp": 5.546398609491,
-    "min_power_uW": 4.125216
+    "upper_arm_voltage": 4.837,
+    "lower_arm_voltage": 4.689,
+    "min_x_power": 0.04263546544521207,
+    "min_dp": 7.730537772944,
+    "min_power_uW": 0.7093379
   },
   "19": {
     "target": 19,
@@ -221,11 +221,11 @@
       73,
       69
     ],
-    "upper_arm_voltage": 3.822,
-    "lower_arm_voltage": 3.928,
-    "min_x_power": 0.029808177658218832,
-    "min_dp": 5.352583511224,
-    "min_power_uW": 0.5481083999999999
+    "upper_arm_voltage": 4.639,
+    "lower_arm_voltage": 4.729,
+    "min_x_power": 0.04320471013743145,
+    "min_dp": 7.751531051961,
+    "min_power_uW": 0.2067511
   },
   "20": {
     "target": 20,
@@ -298,5 +298,17 @@
     "min_x_power": 0.016425169382736953,
     "min_dp": 2.972307438866,
     "min_power_uW": 0.07908803
+  },
+  "9": {
+    "target": 9,
+    "ports": [
+      76,
+      72
+    ],
+    "upper_arm_voltage": 4.873,
+    "lower_arm_voltage": 4.945,
+    "min_x_power": 0.04737015868964402,
+    "min_dp": 8.659245674765,
+    "min_power_uW": 242.5494
   }
 }

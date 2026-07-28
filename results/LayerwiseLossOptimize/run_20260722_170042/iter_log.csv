@@ -1,0 +1,2 @@
+global_target_layer,current_layer,layer_status,skip_reason,layer_iter,loss_before_iter,loss_after_iter,cosine_before_iter,cosine_after_iter,grad_norm,max_abs_grad,accepted,rejected,lr_used
+1,1,skipped,first_or_last_layer_bar_fixed,,,,,,,,,,

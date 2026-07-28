@@ -1,0 +1,1938 @@
+{
+  "1": {
+    "single": true,
+    "ports": [
+      65
+    ],
+    "heater_R": [
+      514.1361980539363
+    ],
+    "Ppi": [
+      0.017448208814283547
+    ],
+    "fit_params": [
+      {
+        "port": 65,
+        "A": 82.75521726622615,
+        "w": 180.0524447539856,
+        "phi": 0.13844225341435212,
+        "b": 83.73566782232537,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.694,
+        "cross_voltage_v": 3.614,
+        "half_power_voltage_v": 4.189,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\1-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.694
+    ],
+    "dtheta_Cross": [
+      3.614
+    ],
+    "half_power": [
+      4.189
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\1-u.txt"
+    ],
+    "updated_at": "2026-05-21 15:53:04"
+  },
+  "9": {
+    "single": false,
+    "ports": [
+      76,
+      72
+    ],
+    "heater_R": [
+      515.3478903835618,
+      516.2115913566885
+    ],
+    "Ppi": [
+      0.01726414098792841,
+      0.01721687501138246
+    ],
+    "fit_params": [
+      {
+        "port": 76,
+        "A": 79.28873065852402,
+        "w": 181.9721384218587,
+        "phi": 1.82268968942505,
+        "b": 89.57055360801517,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.133,
+        "cross_voltage_v": 5.097,
+        "half_power_voltage_v": 5.516,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\9-u.txt"
+      },
+      {
+        "port": 72,
+        "A": 79.42109374843717,
+        "w": 182.47171170800834,
+        "phi": 1.4819860897374282,
+        "b": 90.08361764868872,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.246,
+        "cross_voltage_v": 5.188,
+        "half_power_voltage_v": 3.685,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\9-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.133,
+      4.246
+    ],
+    "dtheta_Cross": [
+      5.097,
+      5.188
+    ],
+    "half_power": [
+      5.516,
+      3.685
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\9-u.txt",
+      "Scandata\\inner_cali_powerdata\\9-d.txt"
+    ],
+    "updated_at": "2026-05-21 16:21:32"
+  },
+  "17": {
+    "single": false,
+    "ports": [
+      84,
+      80
+    ],
+    "heater_R": [
+      512.2326453225982,
+      516.2163076572187
+    ],
+    "Ppi": [
+      0.017272657678371307,
+      0.017231416222286768
+    ],
+    "fit_params": [
+      {
+        "port": 84,
+        "A": 82.63592896455673,
+        "w": 181.88241277563625,
+        "phi": 2.160953095416442,
+        "b": 86.78379312560146,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.004,
+        "cross_voltage_v": 4.988,
+        "half_power_voltage_v": 5.413,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\17-u.txt"
+      },
+      {
+        "port": 80,
+        "A": 83.06284367934214,
+        "w": 182.31772786769088,
+        "phi": 1.2218775611738346,
+        "b": 87.24923481183437,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.333,
+        "cross_voltage_v": 5.261,
+        "half_power_voltage_v": 3.786,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\17-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.004,
+      4.333
+    ],
+    "dtheta_Cross": [
+      4.988,
+      5.261
+    ],
+    "half_power": [
+      5.413,
+      3.786
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\17-u.txt",
+      "Scandata\\inner_cali_powerdata\\17-d.txt"
+    ],
+    "updated_at": "2026-05-21 16:50:00"
+  },
+  "25": {
+    "single": false,
+    "ports": [
+      100,
+      104
+    ],
+    "heater_R": [
+      488.47677429544194,
+      512.4072808050087
+    ],
+    "Ppi": [
+      0.01717277002182601,
+      0.01708696882000157
+    ],
+    "fit_params": [
+      {
+        "port": 100,
+        "A": 84.21636133387406,
+        "w": 182.94035555108087,
+        "phi": 2.095020437523859,
+        "b": 85.94226340572975,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.921,
+        "cross_voltage_v": 4.875,
+        "half_power_voltage_v": 5.288,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\25-u.txt"
+      },
+      {
+        "port": 104,
+        "A": 84.44888107704158,
+        "w": 183.8589797104519,
+        "phi": 1.2526660663419085,
+        "b": 86.82742006020354,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.289,
+        "cross_voltage_v": 5.211,
+        "half_power_voltage_v": 3.744,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\25-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.921,
+      4.289
+    ],
+    "dtheta_Cross": [
+      4.875,
+      5.211
+    ],
+    "half_power": [
+      5.288,
+      3.744
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\25-u.txt",
+      "Scandata\\inner_cali_powerdata\\25-d.txt"
+    ],
+    "updated_at": "2026-05-21 17:18:29"
+  },
+  "33": {
+    "single": true,
+    "ports": [
+      106
+    ],
+    "heater_R": [
+      515.3478903835618
+    ],
+    "Ppi": [
+      0.017530454602827154
+    ],
+    "fit_params": [
+      {
+        "port": 106,
+        "A": 85.7162747709353,
+        "w": 179.2077116518784,
+        "phi": 1.617724334750445,
+        "b": 85.70922803937128,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.235,
+        "cross_voltage_v": 5.193,
+        "half_power_voltage_v": 3.663,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\33-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.235
+    ],
+    "dtheta_Cross": [
+      5.193
+    ],
+    "half_power": [
+      3.663
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\33-u.txt"
+    ],
+    "updated_at": "2026-05-21 17:32:44"
+  },
+  "29": {
+    "single": false,
+    "ports": [
+      33,
+      34
+    ],
+    "heater_R": [
+      513.2701060266568,
+      512.7510218079893
+    ],
+    "Ppi": [
+      0.017538753798890937,
+      0.0175616302279567
+    ],
+    "fit_params": [
+      {
+        "port": 33,
+        "A": 79.45118676806324,
+        "w": 179.12291201604367,
+        "phi": 2.4690223716645647,
+        "b": 79.743912253961,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.928,
+        "cross_voltage_v": 4.943,
+        "half_power_voltage_v": 5.379,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\29-u.txt"
+      },
+      {
+        "port": 34,
+        "A": 81.05498265943625,
+        "w": 178.88957988584858,
+        "phi": 0.769957747742922,
+        "b": 81.62702463096119,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.506,
+        "cross_voltage_v": 5.414,
+        "half_power_voltage_v": 3.975,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\29-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.928,
+      4.506
+    ],
+    "dtheta_Cross": [
+      4.943,
+      5.414
+    ],
+    "half_power": [
+      5.379,
+      3.975
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\29-u.txt",
+      "Scandata\\inner_cali_powerdata\\29-d.txt"
+    ],
+    "updated_at": "2026-05-21 18:01:15"
+  },
+  "34": {
+    "single": true,
+    "ports": [
+      108
+    ],
+    "heater_R": [
+      514.136198053936
+    ],
+    "Ppi": [
+      0.01755746196585141
+    ],
+    "fit_params": [
+      {
+        "port": 108,
+        "A": 91.00553420286171,
+        "w": 178.932049501236,
+        "phi": 0.6966629317039037,
+        "b": 92.42006494772446,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.535,
+        "cross_voltage_v": 5.44,
+        "half_power_voltage_v": 4.007,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\34-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.535
+    ],
+    "dtheta_Cross": [
+      5.44
+    ],
+    "half_power": [
+      4.007
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\34-u.txt"
+    ],
+    "updated_at": "2026-05-21 18:15:32"
+  },
+  "21": {
+    "single": false,
+    "ports": [
+      27,
+      23
+    ],
+    "heater_R": [
+      520.2666806586822,
+      519.0229205586397
+    ],
+    "Ppi": [
+      0.017676501313377665,
+      0.018000822223917183
+    ],
+    "fit_params": [
+      {
+        "port": 27,
+        "A": 81.83213351304877,
+        "w": 177.72706249353882,
+        "phi": 2.694675465863053,
+        "b": 81.86686207618627,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.886,
+        "cross_voltage_v": 4.929,
+        "half_power_voltage_v": 5.376,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\21-u.txt"
+      },
+      {
+        "port": 23,
+        "A": 81.51987543325528,
+        "w": 174.52495305551363,
+        "phi": 0.4824606481171614,
+        "b": 82.72611413862741,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.682,
+        "cross_voltage_v": 3.547,
+        "half_power_voltage_v": 4.153,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\21-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.886,
+      4.682
+    ],
+    "dtheta_Cross": [
+      4.929,
+      3.547
+    ],
+    "half_power": [
+      5.376,
+      4.153
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\21-u.txt",
+      "Scandata\\inner_cali_powerdata\\21-d.txt"
+    ],
+    "updated_at": "2026-05-21 18:43:54"
+  },
+  "26": {
+    "single": false,
+    "ports": [
+      99,
+      103
+    ],
+    "heater_R": [
+      515.347890383562,
+      513.2659336360588
+    ],
+    "Ppi": [
+      0.017277189372768828,
+      0.017432561430138122
+    ],
+    "fit_params": [
+      {
+        "port": 99,
+        "A": 80.54418274593064,
+        "w": 181.83470620177175,
+        "phi": 1.6425370470239748,
+        "b": 80.93941789060392,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.196,
+        "cross_voltage_v": 5.149,
+        "half_power_voltage_v": 3.627,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\26-u.txt"
+      },
+      {
+        "port": 103,
+        "A": 100.32737812840531,
+        "w": 180.2140589711894,
+        "phi": 1.7404506824323178,
+        "b": 92.77860607146124,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.173,
+        "cross_voltage_v": 5.134,
+        "half_power_voltage_v": 3.597,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\26-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.196,
+      4.173
+    ],
+    "dtheta_Cross": [
+      5.149,
+      5.134
+    ],
+    "half_power": [
+      3.627,
+      3.597
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\26-u.txt",
+      "Scandata\\inner_cali_powerdata\\26-d.txt"
+    ],
+    "updated_at": "2026-05-21 19:12:21"
+  },
+  "30": {
+    "single": false,
+    "ports": [
+      38,
+      35
+    ],
+    "heater_R": [
+      512.9298317521508,
+      510.1846535453303
+    ],
+    "Ppi": [
+      0.017767517970955514,
+      0.017496442194547206
+    ],
+    "fit_params": [
+      {
+        "port": 38,
+        "A": 88.86666559381082,
+        "w": 176.81663014076256,
+        "phi": 2.1796656494206763,
+        "b": 89.20712020168965,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.057,
+        "cross_voltage_v": 5.057,
+        "half_power_voltage_v": 5.489,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\30-u.txt"
+      },
+      {
+        "port": 35,
+        "A": 88.40707186019124,
+        "w": 179.55608452608013,
+        "phi": 1.0224665452167878,
+        "b": 88.77213689308165,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.406,
+        "cross_voltage_v": 5.323,
+        "half_power_voltage_v": 3.866,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\30-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.057,
+      4.406
+    ],
+    "dtheta_Cross": [
+      5.057,
+      5.323
+    ],
+    "half_power": [
+      5.489,
+      3.866
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\30-u.txt",
+      "Scandata\\inner_cali_powerdata\\30-d.txt"
+    ],
+    "updated_at": "2026-05-21 19:40:33"
+  },
+  "35": {
+    "single": true,
+    "ports": [
+      105
+    ],
+    "heater_R": [
+      517.0962998222063
+    ],
+    "Ppi": [
+      0.017747843128407347
+    ],
+    "fit_params": [
+      {
+        "port": 105,
+        "A": 80.42128615305634,
+        "w": 177.01264490902184,
+        "phi": 0.5210322760196684,
+        "b": 81.51568472447028,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.628,
+        "cross_voltage_v": 5.532,
+        "half_power_voltage_v": 4.103,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\35-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.628
+    ],
+    "dtheta_Cross": [
+      5.532
+    ],
+    "half_power": [
+      4.103
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\35-u.txt"
+    ],
+    "updated_at": "2026-05-21 19:54:39"
+  },
+  "13": {
+    "single": false,
+    "ports": [
+      19,
+      15
+    ],
+    "heater_R": [
+      515.872379734469,
+      513.2659336360617
+    ],
+    "Ppi": [
+      0.017365943663794098,
+      0.017281085135162615
+    ],
+    "fit_params": [
+      {
+        "port": 19,
+        "A": 77.27095250307788,
+        "w": 180.9053809232167,
+        "phi": 1.903868515388628,
+        "b": 76.90989364219163,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.119,
+        "cross_voltage_v": 5.092,
+        "half_power_voltage_v": 5.514,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\13-u.txt"
+      },
+      {
+        "port": 15,
+        "A": 76.14818243355369,
+        "w": 181.79371428461113,
+        "phi": 1.4167727845387725,
+        "b": 76.61104219261438,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.263,
+        "cross_voltage_v": 5.2,
+        "half_power_voltage_v": 3.707,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\13-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.119,
+      4.263
+    ],
+    "dtheta_Cross": [
+      5.092,
+      5.2
+    ],
+    "half_power": [
+      5.514,
+      3.707
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\13-u.txt",
+      "Scandata\\inner_cali_powerdata\\13-d.txt"
+    ],
+    "updated_at": "2026-05-21 20:23:03"
+  },
+  "18": {
+    "single": false,
+    "ports": [
+      83,
+      79
+    ],
+    "heater_R": [
+      519.0299314222328,
+      511.8941990240126
+    ],
+    "Ppi": [
+      0.01716012112943465,
+      0.01746595747221926
+    ],
+    "fit_params": [
+      {
+        "port": 83,
+        "A": 75.85758926918567,
+        "w": 183.07520266864773,
+        "phi": 1.4252021853594545,
+        "b": 77.31424090839941,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.269,
+        "cross_voltage_v": 5.209,
+        "half_power_voltage_v": 3.711,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\18-u.txt"
+      },
+      {
+        "port": 79,
+        "A": 76.30675815491954,
+        "w": 179.8694780166905,
+        "phi": 1.9558623514895226,
+        "b": 76.23736669816343,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.097,
+        "cross_voltage_v": 5.072,
+        "half_power_voltage_v": 5.495,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\18-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.269,
+      4.097
+    ],
+    "dtheta_Cross": [
+      5.209,
+      5.072
+    ],
+    "half_power": [
+      3.711,
+      5.495
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\18-u.txt",
+      "Scandata\\inner_cali_powerdata\\18-d.txt"
+    ],
+    "updated_at": "2026-05-21 20:51:42"
+  },
+  "22": {
+    "single": false,
+    "ports": [
+      28,
+      24
+    ],
+    "heater_R": [
+      521.1519958260816,
+      525.1175465365234
+    ],
+    "Ppi": [
+      0.01780387187596547,
+      0.01750633792026234
+    ],
+    "fit_params": [
+      {
+        "port": 28,
+        "A": 70.77130336918242,
+        "w": 176.4555864857026,
+        "phi": 2.7202177708650233,
+        "b": 71.04224033639666,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.894,
+        "cross_voltage_v": 4.944,
+        "half_power_voltage_v": 5.393,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\22-u.txt"
+      },
+      {
+        "port": 24,
+        "A": 70.40131482177885,
+        "w": 179.45458769841426,
+        "phi": 0.3967637887742397,
+        "b": 71.65002611809922,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.671,
+        "cross_voltage_v": 5.569,
+        "half_power_voltage_v": 4.15,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\22-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.894,
+      4.671
+    ],
+    "dtheta_Cross": [
+      4.944,
+      5.569
+    ],
+    "half_power": [
+      5.393,
+      4.15
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\22-u.txt",
+      "Scandata\\inner_cali_powerdata\\22-d.txt"
+    ],
+    "updated_at": "2026-05-21 21:19:37"
+  },
+  "27": {
+    "single": false,
+    "ports": [
+      102,
+      98
+    ],
+    "heater_R": [
+      512.5803057759402,
+      509.5044815813442
+    ],
+    "Ppi": [
+      0.017351653819905256,
+      0.017398980308017904
+    ],
+    "fit_params": [
+      {
+        "port": 102,
+        "A": 79.27586882708246,
+        "w": 181.0543643964277,
+        "phi": 2.282330705032333,
+        "b": 79.1315752135642,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.972,
+        "cross_voltage_v": 4.967,
+        "half_power_voltage_v": 5.396,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\27-u.txt"
+      },
+      {
+        "port": 98,
+        "A": 79.1838604773052,
+        "w": 180.56188339623932,
+        "phi": 0.9800255505049051,
+        "b": 80.03988842902302,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.404,
+        "cross_voltage_v": 5.316,
+        "half_power_voltage_v": 3.868,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\27-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.972,
+      4.404
+    ],
+    "dtheta_Cross": [
+      4.967,
+      5.316
+    ],
+    "half_power": [
+      5.396,
+      3.868
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\27-u.txt",
+      "Scandata\\inner_cali_powerdata\\27-d.txt"
+    ],
+    "updated_at": "2026-05-21 21:48:02"
+  },
+  "31": {
+    "single": false,
+    "ports": [
+      36,
+      37
+    ],
+    "heater_R": [
+      509.331946935181,
+      511.3817957574307
+    ],
+    "Ppi": [
+      0.017374292670718928,
+      0.017421694382129604
+    ],
+    "fit_params": [
+      {
+        "port": 36,
+        "A": 70.6575745447966,
+        "w": 180.81844902292633,
+        "phi": 2.1733889759364544,
+        "b": 70.49231640472983,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.0,
+        "cross_voltage_v": 4.985,
+        "half_power_voltage_v": 5.411,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\31-u.txt"
+      },
+      {
+        "port": 37,
+        "A": 70.47880087078458,
+        "w": 180.32647024346258,
+        "phi": 1.0697725395769604,
+        "b": 71.02454828043052,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.386,
+        "cross_voltage_v": 5.305,
+        "half_power_voltage_v": 3.845,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\31-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.0,
+      4.386
+    ],
+    "dtheta_Cross": [
+      4.985,
+      5.305
+    ],
+    "half_power": [
+      5.411,
+      3.845
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\31-u.txt",
+      "Scandata\\inner_cali_powerdata\\31-d.txt"
+    ],
+    "updated_at": "2026-05-21 22:16:08"
+  },
+  "36": {
+    "single": true,
+    "ports": [
+      107
+    ],
+    "heater_R": [
+      516.397588508255
+    ],
+    "Ppi": [
+      0.017646316030416935
+    ],
+    "fit_params": [
+      {
+        "port": 107,
+        "A": 65.41258083085384,
+        "w": 178.0310773180438,
+        "phi": 0.5449011755799313,
+        "b": 65.97449565592804,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.604,
+        "cross_voltage_v": 5.506,
+        "half_power_voltage_v": 4.08,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\36-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.604
+    ],
+    "dtheta_Cross": [
+      5.506
+    ],
+    "half_power": [
+      4.08
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\36-u.txt"
+    ],
+    "updated_at": "2026-05-21 22:30:05"
+  },
+  "5": {
+    "single": false,
+    "ports": [
+      11,
+      7
+    ],
+    "heater_R": [
+      512.0640000350635,
+      509.8400242919656
+    ],
+    "Ppi": [
+      0.017467205637249312,
+      0.017418314104012924
+    ],
+    "fit_params": [
+      {
+        "port": 11,
+        "A": 77.57983134578797,
+        "w": 179.8566249709832,
+        "phi": 2.2335574117475847,
+        "b": 79.2733831012615,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.0,
+        "cross_voltage_v": 4.995,
+        "half_power_voltage_v": 5.424,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\5-u.txt"
+      },
+      {
+        "port": 7,
+        "A": 77.01240444756196,
+        "w": 180.36146522733887,
+        "phi": 1.0209131723995135,
+        "b": 79.36894772211589,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.395,
+        "cross_voltage_v": 5.31,
+        "half_power_voltage_v": 3.857,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\5-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.0,
+      4.395
+    ],
+    "dtheta_Cross": [
+      4.995,
+      5.31
+    ],
+    "half_power": [
+      5.424,
+      3.857
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\5-u.txt",
+      "Scandata\\inner_cali_powerdata\\5-d.txt"
+    ],
+    "updated_at": "2026-05-21 22:58:40"
+  },
+  "10": {
+    "single": false,
+    "ports": [
+      75,
+      71
+    ],
+    "heater_R": [
+      542.2481278088666,
+      516.7381927827229
+    ],
+    "Ppi": [
+      0.017054108349027913,
+      0.017325390903046217
+    ],
+    "fit_params": [
+      {
+        "port": 75,
+        "A": 71.45718406607541,
+        "w": 184.21324582289665,
+        "phi": 1.4786236917927225,
+        "b": 71.47775107308351,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.332,
+        "cross_voltage_v": 5.293,
+        "half_power_voltage_v": 3.761,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\10-u.txt"
+      },
+      {
+        "port": 71,
+        "A": 71.1839789311882,
+        "w": 181.32881798571287,
+        "phi": 1.7265309147490298,
+        "b": 71.8284742306495,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.179,
+        "cross_voltage_v": 5.139,
+        "half_power_voltage_v": 5.558,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\10-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.332,
+      4.179
+    ],
+    "dtheta_Cross": [
+      5.293,
+      5.139
+    ],
+    "half_power": [
+      3.761,
+      5.558
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\10-u.txt",
+      "Scandata\\inner_cali_powerdata\\10-d.txt"
+    ],
+    "updated_at": "2026-05-21 23:26:20"
+  },
+  "14": {
+    "single": false,
+    "ports": [
+      20,
+      16
+    ],
+    "heater_R": [
+      512.4072808050088,
+      508.4817550515487
+    ],
+    "Ppi": [
+      0.017371869579472624,
+      0.01770496996374902
+    ],
+    "fit_params": [
+      {
+        "port": 20,
+        "A": 65.8927475041731,
+        "w": 180.84367023466714,
+        "phi": 1.3742968995525704,
+        "b": 66.68312229941839,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.285,
+        "cross_voltage_v": 5.221,
+        "half_power_voltage_v": 3.729,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\14-u.txt"
+      },
+      {
+        "port": 16,
+        "A": 64.35865812248396,
+        "w": 177.44128682636648,
+        "phi": 2.0078956557867826,
+        "b": 65.1843005969672,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.093,
+        "cross_voltage_v": 5.075,
+        "half_power_voltage_v": 5.501,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\14-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.285,
+      4.093
+    ],
+    "dtheta_Cross": [
+      5.221,
+      5.075
+    ],
+    "half_power": [
+      3.729,
+      5.501
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\14-u.txt",
+      "Scandata\\inner_cali_powerdata\\14-d.txt"
+    ],
+    "updated_at": "2026-05-21 23:53:45"
+  },
+  "19": {
+    "single": false,
+    "ports": [
+      82,
+      78
+    ],
+    "heater_R": [
+      516.2115913566885,
+      518.1450549805647
+    ],
+    "Ppi": [
+      0.017249170202107717,
+      0.017469408512997123
+    ],
+    "fit_params": [
+      {
+        "port": 82,
+        "A": 62.04205554191735,
+        "w": 182.13007447778065,
+        "phi": 1.4672968116239575,
+        "b": 62.56516873568414,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.255,
+        "cross_voltage_v": 5.197,
+        "half_power_voltage_v": 3.695,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\19-u.txt"
+      },
+      {
+        "port": 78,
+        "A": 61.50496046527673,
+        "w": 179.83394522215616,
+        "phi": 1.8629767963140633,
+        "b": 61.83937162384375,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.155,
+        "cross_voltage_v": 5.13,
+        "half_power_voltage_v": 5.553,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\19-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.255,
+      4.155
+    ],
+    "dtheta_Cross": [
+      5.197,
+      5.13
+    ],
+    "half_power": [
+      3.695,
+      5.553
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\19-u.txt",
+      "Scandata\\inner_cali_powerdata\\19-d.txt"
+    ],
+    "updated_at": "2026-05-22 00:21:43"
+  },
+  "23": {
+    "single": false,
+    "ports": [
+      29,
+      25
+    ],
+    "heater_R": [
+      510.5292982664572,
+      511.3817957574308
+    ],
+    "Ppi": [
+      0.017230288386795918,
+      0.01734072210053146
+    ],
+    "fit_params": [
+      {
+        "port": 29,
+        "A": 70.33599016549847,
+        "w": 182.3296617598861,
+        "phi": 1.9729203481500752,
+        "b": 70.40466818609247,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.058,
+        "cross_voltage_v": 5.026,
+        "half_power_voltage_v": 5.446,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\23-u.txt"
+      },
+      {
+        "port": 25,
+        "A": 70.32289444522742,
+        "w": 181.16850240587786,
+        "phi": 1.3523256520340974,
+        "b": 70.71468801836625,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.284,
+        "cross_voltage_v": 5.217,
+        "half_power_voltage_v": 3.731,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\23-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.058,
+      4.284
+    ],
+    "dtheta_Cross": [
+      5.026,
+      5.217
+    ],
+    "half_power": [
+      5.446,
+      3.731
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\23-u.txt",
+      "Scandata\\inner_cali_powerdata\\23-d.txt"
+    ],
+    "updated_at": "2026-05-22 00:49:44"
+  },
+  "28": {
+    "single": false,
+    "ports": [
+      101,
+      97
+    ],
+    "heater_R": [
+      509.50448158134316,
+      518.8484989600064
+    ],
+    "Ppi": [
+      0.017445620517160886,
+      0.017526876107169544
+    ],
+    "fit_params": [
+      {
+        "port": 101,
+        "A": 65.65279793229128,
+        "w": 180.07915800412346,
+        "phi": 1.536384173577689,
+        "b": 66.3069298387543,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.228,
+        "cross_voltage_v": 5.173,
+        "half_power_voltage_v": 3.665,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\28-u.txt"
+      },
+      {
+        "port": 97,
+        "A": 65.6039011618421,
+        "w": 179.24430083149235,
+        "phi": 1.7890475403486112,
+        "b": 66.25107526390345,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.19,
+        "cross_voltage_v": 5.162,
+        "half_power_voltage_v": 3.607,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\28-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.228,
+      4.19
+    ],
+    "dtheta_Cross": [
+      5.173,
+      5.162
+    ],
+    "half_power": [
+      3.665,
+      3.607
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\28-u.txt",
+      "Scandata\\inner_cali_powerdata\\28-d.txt"
+    ],
+    "updated_at": "2026-05-22 01:16:39"
+  },
+  "32": {
+    "single": false,
+    "ports": [
+      40,
+      39
+    ],
+    "heater_R": [
+      511.89419902401255,
+      513.7861779903174
+    ],
+    "Ppi": [
+      0.017455367588190513,
+      0.01737801317410712
+    ],
+    "fit_params": [
+      {
+        "port": 40,
+        "A": 61.404287538951785,
+        "w": 179.97860186658275,
+        "phi": 2.2511070588192883,
+        "b": 61.5989506897261,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.992,
+        "cross_voltage_v": 4.987,
+        "half_power_voltage_v": 5.417,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\32-u.txt"
+      },
+      {
+        "port": 39,
+        "A": 61.6526980575107,
+        "w": 180.77973713765513,
+        "phi": 0.9455224257288206,
+        "b": 61.98282123965213,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.431,
+        "cross_voltage_v": 5.344,
+        "half_power_voltage_v": 3.895,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\32-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.992,
+      4.431
+    ],
+    "dtheta_Cross": [
+      4.987,
+      5.344
+    ],
+    "half_power": [
+      5.417,
+      3.895
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\32-u.txt",
+      "Scandata\\inner_cali_powerdata\\32-d.txt"
+    ],
+    "updated_at": "2026-05-22 01:44:56"
+  },
+  "2": {
+    "single": true,
+    "ports": [
+      67
+    ],
+    "heater_R": [
+      503.9554826555818
+    ],
+    "Ppi": [
+      0.01741578662344638
+    ],
+    "fit_params": [
+      {
+        "port": 67,
+        "A": 77.77056059292497,
+        "w": 180.3876403354848,
+        "phi": 0.838103167744872,
+        "b": 79.72309151191355,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.427,
+        "cross_voltage_v": 5.327,
+        "half_power_voltage_v": 3.9,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\2-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.427
+    ],
+    "dtheta_Cross": [
+      5.327
+    ],
+    "half_power": [
+      3.9
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\2-u.txt"
+    ],
+    "updated_at": "2026-05-22 01:59:00"
+  },
+  "6": {
+    "single": false,
+    "ports": [
+      12,
+      8
+    ],
+    "heater_R": [
+      514.1361980539365,
+      514.6538964400621
+    ],
+    "Ppi": [
+      0.017267417623502264,
+      0.017259830858490276
+    ],
+    "fit_params": [
+      {
+        "port": 12,
+        "A": 77.12021834857019,
+        "w": 181.93760770075124,
+        "phi": 1.638129289434449,
+        "b": 77.26734740334572,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.191,
+        "cross_voltage_v": 5.142,
+        "half_power_voltage_v": 3.623,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\6-u.txt"
+      },
+      {
+        "port": 8,
+        "A": 76.94876642871927,
+        "w": 182.01758055145794,
+        "phi": 1.5828718937312463,
+        "b": 77.36910306152542,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.211,
+        "cross_voltage_v": 5.159,
+        "half_power_voltage_v": 3.646,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\6-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.191,
+      4.211
+    ],
+    "dtheta_Cross": [
+      5.142,
+      5.159
+    ],
+    "half_power": [
+      3.623,
+      3.646
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\6-u.txt",
+      "Scandata\\inner_cali_powerdata\\6-d.txt"
+    ],
+    "updated_at": "2026-05-22 02:27:21"
+  },
+  "11": {
+    "single": false,
+    "ports": [
+      74,
+      70
+    ],
+    "heater_R": [
+      513.2659336360618,
+      515.6908871618543
+    ],
+    "Ppi": [
+      0.01731947809196329,
+      0.01733250374749349
+    ],
+    "fit_params": [
+      {
+        "port": 74,
+        "A": 71.17292997519125,
+        "w": 181.39072302921053,
+        "phi": 1.03193586572029,
+        "b": 71.79469803750658,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.394,
+        "cross_voltage_v": 5.31,
+        "half_power_voltage_v": 3.855,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\11-u.txt"
+      },
+      {
+        "port": 70,
+        "A": 70.62174356876534,
+        "w": 181.25440498139855,
+        "phi": 2.2653032527089234,
+        "b": 70.63278405612643,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.988,
+        "cross_voltage_v": 4.984,
+        "half_power_voltage_v": 5.414,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\11-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.394,
+      3.988
+    ],
+    "dtheta_Cross": [
+      5.31,
+      4.984
+    ],
+    "half_power": [
+      3.855,
+      5.414
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\11-u.txt",
+      "Scandata\\inner_cali_powerdata\\11-d.txt"
+    ],
+    "updated_at": "2026-05-22 02:55:14"
+  },
+  "15": {
+    "single": false,
+    "ports": [
+      21,
+      17
+    ],
+    "heater_R": [
+      511.89419902401266,
+      510.3487706841109
+    ],
+    "Ppi": [
+      0.017340657626019076,
+      0.01731364608161946
+    ],
+    "fit_params": [
+      {
+        "port": 21,
+        "A": 66.97015741305317,
+        "w": 181.16917601071475,
+        "phi": 1.7382821530032393,
+        "b": 66.16297197668112,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.157,
+        "cross_voltage_v": 5.114,
+        "half_power_voltage_v": 5.531,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\15-u.txt"
+      },
+      {
+        "port": 17,
+        "A": 66.93483099584596,
+        "w": 181.45182353732963,
+        "phi": 1.6474752897877218,
+        "b": 66.79088909613488,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.178,
+        "cross_voltage_v": 5.128,
+        "half_power_voltage_v": 3.611,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\15-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.157,
+      4.178
+    ],
+    "dtheta_Cross": [
+      5.114,
+      5.128
+    ],
+    "half_power": [
+      5.531,
+      3.611
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\15-u.txt",
+      "Scandata\\inner_cali_powerdata\\15-d.txt"
+    ],
+    "updated_at": "2026-05-22 03:22:51"
+  },
+  "20": {
+    "single": false,
+    "ports": [
+      81,
+      77
+    ],
+    "heater_R": [
+      512.0640000350625,
+      513.4408163499965
+    ],
+    "Ppi": [
+      0.01735876216015551,
+      0.01750579747642975
+    ],
+    "fit_params": [
+      {
+        "port": 81,
+        "A": 71.76379344557529,
+        "w": 180.98022339408843,
+        "phi": 1.823837902706428,
+        "b": 71.41646849255584,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.131,
+        "cross_voltage_v": 5.094,
+        "half_power_voltage_v": 5.513,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\20-u.txt"
+      },
+      {
+        "port": 77,
+        "A": 71.7760985475443,
+        "w": 179.46012787019347,
+        "phi": 1.480527078873763,
+        "b": 72.50812998885027,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.27,
+        "cross_voltage_v": 5.218,
+        "half_power_voltage_v": 3.707,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\20-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.131,
+      4.27
+    ],
+    "dtheta_Cross": [
+      5.094,
+      5.218
+    ],
+    "half_power": [
+      5.513,
+      3.707
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\20-u.txt",
+      "Scandata\\inner_cali_powerdata\\20-d.txt"
+    ],
+    "updated_at": "2026-05-22 03:50:54"
+  },
+  "24": {
+    "single": false,
+    "ports": [
+      26,
+      30
+    ],
+    "heater_R": [
+      509.33194693518107,
+      510.52085848376345
+    ],
+    "Ppi": [
+      0.017352001670064725,
+      0.017323155047847108
+    ],
+    "fit_params": [
+      {
+        "port": 26,
+        "A": 66.3091041768246,
+        "w": 181.0507348561173,
+        "phi": 1.9262959262873265,
+        "b": 66.13304426723376,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.084,
+        "cross_voltage_v": 5.051,
+        "half_power_voltage_v": 5.471,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\24-u.txt"
+      },
+      {
+        "port": 30,
+        "A": 66.13262039816254,
+        "w": 181.35222163125675,
+        "phi": 1.3622730594664905,
+        "b": 66.51802749096183,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.275,
+        "cross_voltage_v": 5.208,
+        "half_power_voltage_v": 3.722,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\24-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.084,
+      4.275
+    ],
+    "dtheta_Cross": [
+      5.051,
+      5.208
+    ],
+    "half_power": [
+      5.471,
+      3.722
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\24-u.txt",
+      "Scandata\\inner_cali_powerdata\\24-d.txt"
+    ],
+    "updated_at": "2026-05-22 04:18:40"
+  },
+  "3": {
+    "single": true,
+    "ports": [
+      66
+    ],
+    "heater_R": [
+      498.3646816458423
+    ],
+    "Ppi": [
+      0.01761024447817136
+    ],
+    "fit_params": [
+      {
+        "port": 66,
+        "A": 67.8969651932485,
+        "w": 178.39574331202098,
+        "phi": 1.2532132156462623,
+        "b": 69.17221800235208,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.294,
+        "cross_voltage_v": 5.217,
+        "half_power_voltage_v": 3.749,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\3-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.294
+    ],
+    "dtheta_Cross": [
+      5.217
+    ],
+    "half_power": [
+      3.749
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\3-u.txt"
+    ],
+    "updated_at": "2026-05-22 04:32:30"
+  },
+  "7": {
+    "single": false,
+    "ports": [
+      13,
+      9
+    ],
+    "heater_R": [
+      511.3774400151507,
+      511.5557342129538
+    ],
+    "Ppi": [
+      0.01737073217979039,
+      0.017512783814076022
+    ],
+    "fit_params": [
+      {
+        "port": 13,
+        "A": 63.93697504930273,
+        "w": 180.85551150485253,
+        "phi": 2.084993404291426,
+        "b": 64.53131823284002,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.039,
+        "cross_voltage_v": 5.019,
+        "half_power_voltage_v": 5.444,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\7-u.txt"
+      },
+      {
+        "port": 9,
+        "A": 64.70124464932192,
+        "w": 179.38853622259165,
+        "phi": 1.234927931765979,
+        "b": 65.2028530042333,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.345,
+        "cross_voltage_v": 5.276,
+        "half_power_voltage_v": 3.794,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\7-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.039,
+      4.345
+    ],
+    "dtheta_Cross": [
+      5.019,
+      5.276
+    ],
+    "half_power": [
+      5.444,
+      3.794
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\7-u.txt",
+      "Scandata\\inner_cali_powerdata\\7-d.txt"
+    ],
+    "updated_at": "2026-05-22 05:00:51"
+  },
+  "12": {
+    "single": false,
+    "ports": [
+      73,
+      69
+    ],
+    "heater_R": [
+      518.8484989600095,
+      517.6158092222656
+    ],
+    "Ppi": [
+      0.017433843726584998,
+      0.017518722008865055
+    ],
+    "fit_params": [
+      {
+        "port": 73,
+        "A": 62.560128342144985,
+        "w": 180.20080384219315,
+        "phi": 1.8449242994778192,
+        "b": 63.185655157303,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.16,
+        "cross_voltage_v": 5.133,
+        "half_power_voltage_v": 5.556,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\12-u.txt"
+      },
+      {
+        "port": 69,
+        "A": 62.8505638557604,
+        "w": 179.32773018488695,
+        "phi": 1.5073073940802288,
+        "b": 64.21984608171812,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.28,
+        "cross_voltage_v": 5.233,
+        "half_power_voltage_v": 3.713,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\12-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.16,
+      4.28
+    ],
+    "dtheta_Cross": [
+      5.133,
+      5.233
+    ],
+    "half_power": [
+      5.556,
+      3.713
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\12-u.txt",
+      "Scandata\\inner_cali_powerdata\\12-d.txt"
+    ],
+    "updated_at": "2026-05-22 05:28:52"
+  },
+  "16": {
+    "single": false,
+    "ports": [
+      22,
+      18
+    ],
+    "heater_R": [
+      505.95816485201095,
+      509.33194693518277
+    ],
+    "Ppi": [
+      0.017353143221000174,
+      0.017404503560649476
+    ],
+    "fit_params": [
+      {
+        "port": 22,
+        "A": 72.36467185064897,
+        "w": 181.03882470052724,
+        "phi": 2.250193070820341,
+        "b": 72.45980939614343,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 3.957,
+        "cross_voltage_v": 4.944,
+        "half_power_voltage_v": 5.369,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\16-u.txt"
+      },
+      {
+        "port": 18,
+        "A": 72.45882683817756,
+        "w": 180.5045827732049,
+        "phi": 1.060142138723247,
+        "b": 72.95899809062126,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.378,
+        "cross_voltage_v": 5.295,
+        "half_power_voltage_v": 3.839,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\16-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      3.957,
+      4.378
+    ],
+    "dtheta_Cross": [
+      4.944,
+      5.295
+    ],
+    "half_power": [
+      5.369,
+      3.839
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\16-u.txt",
+      "Scandata\\inner_cali_powerdata\\16-d.txt"
+    ],
+    "updated_at": "2026-05-22 05:56:27"
+  },
+  "4": {
+    "single": true,
+    "ports": [
+      68
+    ],
+    "heater_R": [
+      514.1361980539345
+    ],
+    "Ppi": [
+      0.017750337370541564
+    ],
+    "fit_params": [
+      {
+        "port": 68,
+        "A": 68.67092818155999,
+        "w": 176.98777144391497,
+        "phi": 1.4636353910421827,
+        "b": 70.03969939136788,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.309,
+        "cross_voltage_v": 5.262,
+        "half_power_voltage_v": 3.742,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\4-u.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.309
+    ],
+    "dtheta_Cross": [
+      5.262
+    ],
+    "half_power": [
+      3.742
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\4-u.txt"
+    ],
+    "updated_at": "2026-05-22 06:10:26"
+  },
+  "8": {
+    "single": false,
+    "ports": [
+      14,
+      10
+    ],
+    "heater_R": [
+      514.1317715531885,
+      513.6152391977142
+    ],
+    "Ppi": [
+      0.01731589510534845,
+      0.017422289089390194
+    ],
+    "fit_params": [
+      {
+        "port": 14,
+        "A": 67.43926357823482,
+        "w": 181.42825620486886,
+        "phi": 2.2065150374761586,
+        "b": 68.31384246582566,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.0,
+        "cross_voltage_v": 4.991,
+        "half_power_voltage_v": 5.418,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\8-u.txt"
+      },
+      {
+        "port": 10,
+        "A": 69.1866643891481,
+        "w": 180.32031482607854,
+        "phi": 1.069909330776123,
+        "b": 69.83725565483262,
+        "model": "OP = A * sin(w * P + phi) + b",
+        "bar_voltage_v": 4.396,
+        "cross_voltage_v": 5.317,
+        "half_power_voltage_v": 3.853,
+        "scan_data_path": "Scandata\\inner_cali_powerdata\\8-d.txt"
+      }
+    ],
+    "dtheta_Bar": [
+      4.0,
+      4.396
+    ],
+    "dtheta_Cross": [
+      4.991,
+      5.317
+    ],
+    "half_power": [
+      5.418,
+      3.853
+    ],
+    "scan_data_path": [
+      "Scandata\\inner_cali_powerdata\\8-u.txt",
+      "Scandata\\inner_cali_powerdata\\8-d.txt"
+    ],
+    "updated_at": "2026-05-22 06:37:56"
+  }
+}

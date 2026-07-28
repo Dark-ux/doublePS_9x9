@@ -41,6 +41,7 @@ INNER_SCAN_END_POWER_W = 0.06
 INNER_SCAN_STEP_POWER_W = 0.001
 INNER_FINE_SCAN_WINDOW_POWER_W = 0.001
 INNER_FINE_SCAN_STEP_POWER_W = 0.0001
+INNER_SCAN_MAX_VOLTAGE_V = 5.5
 
 
 def _inner_arm_suffix(arm_index: int) -> str:
@@ -1336,6 +1337,17 @@ def _scan_mzi_impl(
         ),
         6,
     )
+    safe_power_limit_w = float(INNER_SCAN_MAX_VOLTAGE_V) ** 2 / float(R)
+    target_power_values = target_power_values[target_power_values <= safe_power_limit_w + 1e-12]
+    if target_power_values.size == 0:
+        raise ValueError(
+            f"No safe inner scan power points for port {port} within "
+            f"0-{INNER_SCAN_MAX_VOLTAGE_V} V."
+        )
+    print(
+        f"Inner scan safety limit: <= {INNER_SCAN_MAX_VOLTAGE_V:.3f} V, "
+        f"measured R={R:.6f} Ohm, max target power={target_power_values[-1]:.6f} W"
+    )
     print(f"Coarse power scan points: {len(target_power_values)}")
 
     def scan_power_points(power_values, stage_name):
@@ -1344,6 +1356,11 @@ def _scan_mzi_impl(
         for target_power in power_values:
             v = _voltage_from_resistance_power(float(target_power), R)
             v = round(v, 3)
+            if v > float(INNER_SCAN_MAX_VOLTAGE_V):
+                raise ValueError(
+                    f"Refusing inner scan upload for port {port}: {v:.3f} V exceeds "
+                    f"{INNER_SCAN_MAX_VOLTAGE_V:.3f} V."
+                )
             try:
                 file_path_df.at[port - 1, 0] = v
             except Exception as e:
@@ -1418,6 +1435,9 @@ def _scan_mzi_impl(
         INNER_SCAN_END_POWER_W,
         coarse_scan["electrical_power"],
     )
+    fine_power_values = fine_power_values[
+        fine_power_values <= safe_power_limit_w + 1e-12
+    ]
     print(f"Coarse fit: A={coarse_A:.6f}, w={coarse_w:.6f}, " f"phi={coarse_phi:.6f}, b={coarse_b:.6f}")
     print(f"Fine scan windows: {fine_scan_info['fine_windows']}")
     if fine_power_values.size > 0:

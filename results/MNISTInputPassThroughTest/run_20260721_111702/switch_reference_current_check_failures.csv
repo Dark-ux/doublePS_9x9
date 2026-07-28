@@ -1,0 +1,2 @@
+mzi,port,voltage,expected_mA,actual_mA,lower_mA,upper_mA,reference_input_channel
+4,48,3.451,6.77554200313923,7.880128096671955,6.0979878028253065,7.453096203453153,4

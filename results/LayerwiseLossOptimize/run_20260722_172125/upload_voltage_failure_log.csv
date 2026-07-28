@@ -1,0 +1,2 @@
+timestamp,port,voltage,current_mA,threshold_mA,min_check_voltage,attempts
+2026-07-22 17:21:36,29,4.058,-0.2687606635032886,0.01,0.5,10

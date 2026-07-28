@@ -129,6 +129,13 @@ def get_active_heater_ports(mzi_table, mzi_ids):
     return active
 
 
+def get_heater_voltage_bounds(heater, v_min, v_max):
+    return (
+        max(float(v_min), float(heater.get("v_min", v_min))),
+        min(float(v_max), float(heater.get("v_max", v_max))),
+    )
+
+
 def write_checked_port_voltage(port, voltage, working_data, v_min, v_max):
     voltage = float(np.clip(float(voltage), float(v_min), float(v_max)))
     cu.write_port_voltage(int(port), voltage, working_data)
@@ -185,9 +192,23 @@ def set_layer_to_bar_voltage_pair(working_data, cm, layer_index, mzi_table, v_mi
             write_checked_port_voltage(port, float(bar_values[arm_index]), working_data, v_min, v_max)
 
 
+def fold_target_phase_near_base(target_phase, base_phase):
+    """Return the 2*pi-equivalent target closest to the calibration base phase."""
+    target_phase = float(target_phase)
+    base_phase = float(base_phase)
+    two_pi = 2.0 * np.pi
+    phase_offset = (target_phase - base_phase + np.pi) % two_pi - np.pi
+    # Keep an exact positive pi request positive instead of changing its direction.
+    if np.isclose(phase_offset, -np.pi) and target_phase - base_phase > 0.0:
+        phase_offset = np.pi
+    folded_target_phase = base_phase + phase_offset
+    wrap_cycles = int(np.rint((folded_target_phase - target_phase) / two_pi))
+    return float(folded_target_phase), float(phase_offset), wrap_cycles
+
+
 def voltage_from_phase_offset(base_voltage, base_phase, target_phase, ppi, heater_r, v_min, v_max):
     base_voltage = float(base_voltage)
-    phase_offset = float(target_phase) - float(base_phase)
+    _, phase_offset, _ = fold_target_phase_near_base(target_phase, base_phase)
     ppi = float(ppi)
     heater_r = float(heater_r)
     base_power = base_voltage * base_voltage / heater_r
@@ -264,6 +285,10 @@ def set_layer_to_target_prebiased_pair(
             target_phase = float(target_thetas[mzi_id - 1, arm_index])
             # inter_cali_pairs is calibrated near theta1=pi, theta2=0.
             base_phase = np.pi if arm_index == 0 else 0.0
+            folded_target_phase, phase_offset, phase_wrap_cycles = fold_target_phase_near_base(
+                target_phase,
+                base_phase,
+            )
             initial_voltage = voltage_from_phase_offset(
                 base_voltage,
                 base_phase,
@@ -283,7 +308,9 @@ def set_layer_to_target_prebiased_pair(
                     "base_voltage": base_voltage,
                     "base_phase": float(base_phase),
                     "target_phase": target_phase,
-                    "phase_offset": float(target_phase - base_phase),
+                    "folded_target_phase": folded_target_phase,
+                    "phase_wrap_cycles": phase_wrap_cycles,
+                    "phase_offset": phase_offset,
                     "initial_voltage": actual_voltage,
                     "mode": mode,
                 }
@@ -305,6 +332,60 @@ def build_target_power_matrix(cm, target_thetas, output_count, layer_index):
     target_thetas_for_loss = build_target_thetas_for_layer(cm, target_thetas, layer_index)
     # Theoretical Bar approximation used by this project: theta1=pi, theta2=0.
     return um.theoretical_power_matrix(cm, target_thetas_for_loss, output_count)
+
+
+def select_focus_submatrix(matrix, focus_size=None):
+    matrix = np.asarray(matrix, dtype=float)
+    if matrix.ndim != 2:
+        raise ValueError(f"power matrix must be 2-D, got shape {matrix.shape}")
+    if focus_size is None:
+        return matrix
+    focus_size = int(focus_size)
+    if focus_size < 1 or focus_size > min(matrix.shape):
+        raise ValueError(
+            f"focus_size must be in [1, {min(matrix.shape)}] for matrix shape {matrix.shape}, "
+            f"got {focus_size}"
+        )
+    return matrix[:focus_size, :focus_size]
+
+
+def get_focus_influential_mzi_ids(
+    cm,
+    target_thetas,
+    output_count,
+    layer_index,
+    focus_size,
+    phase_probe=1e-2,
+    influence_tol=1e-12,
+):
+    """Return layer MZIs whose phase changes the selected theoretical submatrix."""
+    layer_mzi_ids = get_layer_mzi_ids(cm, layer_index)
+    if focus_size is None:
+        return layer_mzi_ids, []
+
+    layer_thetas = build_target_thetas_for_layer(cm, target_thetas, layer_index)
+    baseline_power = um.theoretical_power_matrix(cm, layer_thetas, output_count)
+    baseline_focus = select_focus_submatrix(baseline_power, focus_size)
+    influential = []
+    direct_only = []
+    for mzi_id in layer_mzi_ids:
+        affects_focus = False
+        for arm_index in range(layer_thetas.shape[1]):
+            theta_minus = layer_thetas.copy()
+            theta_plus = layer_thetas.copy()
+            theta_minus[mzi_id - 1, arm_index] -= float(phase_probe)
+            theta_plus[mzi_id - 1, arm_index] += float(phase_probe)
+            power_minus = um.theoretical_power_matrix(cm, theta_minus, output_count)
+            power_plus = um.theoretical_power_matrix(cm, theta_plus, output_count)
+            minus_delta = select_focus_submatrix(power_minus, focus_size) - baseline_focus
+            plus_delta = select_focus_submatrix(power_plus, focus_size) - baseline_focus
+            if max(float(np.linalg.norm(minus_delta)), float(np.linalg.norm(plus_delta))) > float(
+                influence_tol
+            ):
+                affects_focus = True
+                break
+        (influential if affects_focus else direct_only).append(int(mzi_id))
+    return influential, direct_only
 
 
 def voltage_to_dry_run_theta(mzi_table, mzi_id, arm_index, voltage):
@@ -366,11 +447,15 @@ def measure_power_matrix(args, working_data):
     measure_context = str(getattr(args, "measure_context", "measurement"))
     figure_path = None
     if getattr(args, "run_dir", None) is not None:
-        # Finite-difference plus/minus probes are numerous and only used to
-        # estimate gradients, so skip saving their heatmaps to reduce output.
-        if not measure_context.endswith(("_plus", "_minus")):
+        # Save exactly one matrix image per completed layer iteration. Baseline,
+        # finite-difference, accepted-step, and line-search measurements are
+        # transient optimizer probes and must not produce matrix images.
+        completed_iter = re.fullmatch(r"layer(\d+)_iter(\d+)_final", measure_context)
+        if completed_iter:
             figure_dir = Path(args.run_dir) / "power_matrix_figures"
-            figure_path = figure_dir / f"measure_{measure_idx:04d}_{measure_context}.png"
+            layer_number = int(completed_iter.group(1))
+            iter_number = int(completed_iter.group(2))
+            figure_path = figure_dir / f"P_current_layer{layer_number:02d}_iter{iter_number:03d}.png"
         switch_current_log_path = Path(args.run_dir) / "switch_current_check_log.csv"
     else:
         switch_current_log_path = None
@@ -394,18 +479,35 @@ def measure_power_matrix(args, working_data):
     return P_current
 
 
-def power_matrix_loss(P_current, P_target, eps=1e-12):
-    diff = np.asarray(P_current, dtype=float) - np.asarray(P_target, dtype=float)
-    return float(np.sum(diff**2) / (np.sum(np.asarray(P_target, dtype=float) ** 2) + eps))
+def power_matrix_loss(P_current, P_target, eps=1e-12, focus_size=None):
+    current = select_focus_submatrix(P_current, focus_size)
+    target = select_focus_submatrix(P_target, focus_size)
+    if current.shape != target.shape:
+        raise ValueError(f"current/target focused matrix shape mismatch: {current.shape} vs {target.shape}")
+    diff = current - target
+    return float(np.sum(diff**2) / (np.sum(target**2) + eps))
 
 
-def power_matrix_cosine_similarity(P_current, P_target, eps=1e-12):
-    current = np.asarray(P_current, dtype=float).ravel()
-    target = np.asarray(P_target, dtype=float).ravel()
+def power_matrix_cosine_similarity(P_current, P_target, eps=1e-12, focus_size=None):
+    current = select_focus_submatrix(P_current, focus_size).ravel()
+    target = select_focus_submatrix(P_target, focus_size).ravel()
     denom = float(np.linalg.norm(current) * np.linalg.norm(target))
     if denom <= eps:
         return 0.0
     return float(np.dot(current, target) / denom)
+
+
+def optimization_loss(args, P_current, P_target, working_data):
+    loss = power_matrix_loss(P_current, P_target, focus_size=args.focus_size)
+    regularization = float(getattr(args, "previous_layer_regularization", 0.0))
+    compensation_heaters = getattr(args, "previous_layer_compensation_heaters", [])
+    if regularization > 0.0 and compensation_heaters:
+        offsets = []
+        for heater in compensation_heaters:
+            voltage = float(working_data.iloc[int(heater["port"]) - 1, 0])
+            offsets.append(voltage - float(heater["checkpoint_voltage"]))
+        loss += regularization * float(np.sum(np.square(offsets)))
+    return float(loss)
 
 
 def get_heater_voltages(working_data, active_heaters):
@@ -414,7 +516,8 @@ def get_heater_voltages(working_data, active_heaters):
 
 def set_heater_voltages(working_data, active_heaters, voltages, v_min, v_max):
     for heater, voltage in zip(active_heaters, voltages):
-        write_checked_port_voltage(heater["port"], voltage, working_data, v_min, v_max)
+        heater_v_min, heater_v_max = get_heater_voltage_bounds(heater, v_min, v_max)
+        write_checked_port_voltage(heater["port"], voltage, working_data, heater_v_min, heater_v_max)
 
 
 def finite_difference_gradient(args, working_data, active_heaters, base_voltages, P_target):
@@ -425,8 +528,9 @@ def finite_difference_gradient(args, working_data, active_heaters, base_voltages
 
     for idx, heater in enumerate(active_heaters):
         v0 = float(base_voltages[idx])
-        plus_v = min(args.v_max, v0 + args.delta_v)
-        minus_v = max(args.v_min, v0 - args.delta_v)
+        heater_v_min, heater_v_max = get_heater_voltage_bounds(heater, args.v_min, args.v_max)
+        plus_v = min(heater_v_max, v0 + args.delta_v)
+        minus_v = max(heater_v_min, v0 - args.delta_v)
 
         plus_loss = None
         minus_loss = None
@@ -436,26 +540,36 @@ def finite_difference_gradient(args, working_data, active_heaters, base_voltages
             trial[idx] = plus_v
             set_heater_voltages(working_data, active_heaters, trial, args.v_min, args.v_max)
             args.measure_context = f"{context_prefix}_{heater['label']}_plus"
-            plus_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+            plus_loss = optimization_loss(
+                args, measure_power_matrix(args, working_data), P_target, working_data
+            )
 
         if minus_v != v0:
             trial = base_voltages.copy()
             trial[idx] = minus_v
             set_heater_voltages(working_data, active_heaters, trial, args.v_min, args.v_max)
             args.measure_context = f"{context_prefix}_{heater['label']}_minus"
-            minus_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+            minus_loss = optimization_loss(
+                args, measure_power_matrix(args, working_data), P_target, working_data
+            )
 
         if plus_loss is not None and minus_loss is not None and plus_v != minus_v:
             grad[idx] = (plus_loss - minus_loss) / (plus_v - minus_v)
             mode = "central"
         elif plus_loss is not None:
+            set_heater_voltages(working_data, active_heaters, base_voltages, args.v_min, args.v_max)
             args.measure_context = f"{context_prefix}_{heater['label']}_base"
-            base_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+            base_loss = optimization_loss(
+                args, measure_power_matrix(args, working_data), P_target, working_data
+            )
             grad[idx] = (plus_loss - base_loss) / (plus_v - v0)
             mode = "forward"
         elif minus_loss is not None:
+            set_heater_voltages(working_data, active_heaters, base_voltages, args.v_min, args.v_max)
             args.measure_context = f"{context_prefix}_{heater['label']}_base"
-            base_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+            base_loss = optimization_loss(
+                args, measure_power_matrix(args, working_data), P_target, working_data
+            )
             grad[idx] = (base_loss - minus_loss) / (v0 - minus_v)
             mode = "backward"
         else:
@@ -634,6 +748,7 @@ def append_heater_update_log(run_dir, rows):
             "loss_before_iter",
             "loss_after_iter",
             "heater_label",
+            "heater_role",
             "heater_port",
             "mzi_id",
             "arm_index",
@@ -789,14 +904,68 @@ def optimize_one_layer(
         init_records = []
     save_initial_voltage_records(run_dir, init_records)
 
-    active_mzi_ids = get_layer_mzi_ids(cm, layer_index)
+    layer_mzi_ids = get_layer_mzi_ids(cm, layer_index)
+    active_mzi_ids, direct_only_mzi_ids = get_focus_influential_mzi_ids(
+        cm,
+        target_thetas,
+        args.output_count,
+        layer_index,
+        args.focus_size,
+    )
     active_heaters = get_active_heater_ports(mzi_table, active_mzi_ids)
-    args.active_heaters = active_heaters
+    for heater in active_heaters:
+        heater["role"] = "current_layer"
+
+    previous_layer_heaters = []
+    if args.couple_previous_layer and layer_index > 0:
+        previous_mzi_ids, _ = get_focus_influential_mzi_ids(
+            cm,
+            target_thetas,
+            args.output_count,
+            layer_index - 1,
+            args.focus_size,
+        )
+        previous_layer_heaters = get_active_heater_ports(mzi_table, previous_mzi_ids)
+        for heater in previous_layer_heaters:
+            checkpoint_voltage = float(working_data.iloc[int(heater["port"]) - 1, 0])
+            heater["role"] = "previous_layer_compensation"
+            heater["checkpoint_voltage"] = checkpoint_voltage
+            heater["v_min"] = max(
+                float(args.v_min),
+                checkpoint_voltage - float(args.previous_layer_max_offset_v),
+            )
+            heater["v_max"] = min(
+                float(args.v_max),
+                checkpoint_voltage + float(args.previous_layer_max_offset_v),
+            )
+    args.previous_layer_compensation_heaters = previous_layer_heaters
+    all_active_heaters = active_heaters + previous_layer_heaters
+    args.active_heaters = all_active_heaters
     P_target = build_target_power_matrix(cm, target_thetas, args.output_count, layer_index)
     np.savetxt(run_dir / f"target_power_matrix_layer{layer_index + 1:02d}.csv", P_target, delimiter=",")
+    if args.focus_size is not None:
+        np.savetxt(
+            run_dir / f"target_power_submatrix_{args.focus_size}x{args.focus_size}_layer{layer_index + 1:02d}.csv",
+            select_focus_submatrix(P_target, args.focus_size),
+            delimiter=",",
+        )
 
-    print(f"Optimizing layer {layer_index + 1}: MZI ids {active_mzi_ids}")
+    print(f"Optimizing layer {layer_index + 1}: layer MZI ids {layer_mzi_ids}")
+    print(
+        f"Focus region: "
+        f"{'full matrix' if args.focus_size is None else f'top-left {args.focus_size}x{args.focus_size}'}"
+    )
+    if direct_only_mzi_ids:
+        print(
+            "Direct target mapping only (no influence on focus region): "
+            + ", ".join(f"MZI{x}" for x in direct_only_mzi_ids)
+        )
     print(f"Active heaters: {active_heaters}")
+    if previous_layer_heaters:
+        print(
+            f"Previous-layer compensation heaters (layer {layer_index}): "
+            f"{previous_layer_heaters}"
+        )
     if initialize_layer:
         print("Initial active-layer voltages:")
         for rec in init_records:
@@ -805,6 +974,7 @@ def optimize_one_layer(
                 f"{rec['base_voltage']:.3f} V -> {rec['initial_voltage']:.3f} V "
                 f"(base_phase={rec.get('base_phase', 0.0):.6g}, "
                 f"target_phase={rec['target_phase']:.6g}, "
+                f"folded_target={rec.get('folded_target_phase', rec['target_phase']):.6g}, "
                 f"phase_offset={rec.get('phase_offset', 0.0):.6g}, {rec['mode']})"
             )
     else:
@@ -815,6 +985,7 @@ def optimize_one_layer(
     final_power = None
     iterations_completed = 0
     layer_start_loss = None
+    convergence_hits = 0
     previous_grad_by_label = load_previous_layer_gradients(
         run_dir,
         layer_index + 1,
@@ -824,23 +995,35 @@ def optimize_one_layer(
     for iter_idx in range(int(start_iter), args.max_iter):
         args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_baseline"
         P_current = measure_power_matrix(args, working_data)
-        loss = power_matrix_loss(P_current, P_target)
-        cosine_before_iter = power_matrix_cosine_similarity(P_current, P_target)
+        loss = optimization_loss(args, P_current, P_target, working_data)
+        cosine_before_iter = power_matrix_cosine_similarity(
+            P_current, P_target, focus_size=args.focus_size
+        )
         if layer_start_loss is None:
             layer_start_loss = float(loss)
-        np.savetxt(run_dir / f"P_current_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv", P_current, delimiter=",")
-        save_voltage_state(run_dir / f"voltage_state_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv", working_data)
-
         current_loss = loss
         grad_values = []
         heater_rows = []
         accepted_any = False
         rejected_any = False
         lr_values = []
-        iteration_heaters, heater_order_mode = order_heaters_for_iteration(
+        current_iteration_heaters, current_order_mode = order_heaters_for_iteration(
             active_heaters,
             previous_grad_by_label,
             args.heater_order_strategy,
+        )
+        previous_iteration_heaters, previous_order_mode = order_heaters_for_iteration(
+            previous_layer_heaters,
+            previous_grad_by_label,
+            args.heater_order_strategy,
+        )
+        # Alternate by block: optimize the newly mapped current layer first,
+        # then let the nearest previous layer compensate its measured impact.
+        iteration_heaters = current_iteration_heaters + previous_iteration_heaters
+        heater_order_mode = (
+            f"current:{current_order_mode};previous:{previous_order_mode}"
+            if previous_layer_heaters
+            else current_order_mode
         )
         print(
             f"Layer {layer_index + 1} iter {iter_idx:03d} heater order "
@@ -861,17 +1044,42 @@ def optimize_one_layer(
             rejected = False
             accepted_lr = float(args.lr)
             line_search_trials = 0
-            heater_after = update_voltages(heater_before, grad, args.lr, args.max_step_v, args.v_min, args.v_max)
+            heater_v_min, heater_v_max = get_heater_voltage_bounds(heater, args.v_min, args.v_max)
+            heater_max_step_v = (
+                args.previous_layer_max_step_v
+                if heater.get("role") == "previous_layer_compensation"
+                else args.max_step_v
+            )
+            heater_after = update_voltages(
+                heater_before,
+                grad,
+                args.lr,
+                heater_max_step_v,
+                heater_v_min,
+                heater_v_max,
+            )
 
             if args.line_search:
                 accepted = False
                 trial_lr = float(args.lr)
                 while trial_lr >= float(args.line_search_min_lr):
                     line_search_trials += 1
-                    trial_after = update_voltages(heater_before, grad, trial_lr, args.max_step_v, args.v_min, args.v_max)
+                    trial_after = update_voltages(
+                        heater_before,
+                        grad,
+                        trial_lr,
+                        heater_max_step_v,
+                        heater_v_min,
+                        heater_v_max,
+                    )
                     set_heater_voltages(working_data, [heater], trial_after, args.v_min, args.v_max)
                     args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_{heater['label']}_line_search"
-                    trial_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+                    trial_loss = optimization_loss(
+                        args,
+                        measure_power_matrix(args, working_data),
+                        P_target,
+                        working_data,
+                    )
                     if trial_loss < current_loss:
                         accepted = True
                         accepted_lr = trial_lr
@@ -886,7 +1094,12 @@ def optimize_one_layer(
             else:
                 set_heater_voltages(working_data, [heater], heater_after, args.v_min, args.v_max)
                 args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_{heater['label']}_accepted"
-                current_loss = power_matrix_loss(measure_power_matrix(args, working_data), P_target)
+                current_loss = optimization_loss(
+                    args,
+                    measure_power_matrix(args, working_data),
+                    P_target,
+                    working_data,
+                )
 
             accepted_any = accepted_any or accepted
             rejected_any = rejected_any or rejected
@@ -901,6 +1114,7 @@ def optimize_one_layer(
                     "loss_before_iter": float(heater_loss_before),
                     "loss_after_iter": float(current_loss),
                     "heater_label": heater["label"],
+                    "heater_role": heater.get("role", "current_layer"),
                     "heater_port": int(heater["port"]),
                     "mzi_id": int(heater["mzi_id"]),
                     "arm_index": int(heater["arm_index"]),
@@ -915,8 +1129,28 @@ def optimize_one_layer(
 
         args.measure_context = f"layer{layer_index + 1:02d}_iter{iter_idx:03d}_final"
         final_power = measure_power_matrix(args, working_data)
-        final_loss = power_matrix_loss(final_power, P_target)
-        cosine_after_iter = power_matrix_cosine_similarity(final_power, P_target)
+        final_loss = optimization_loss(args, final_power, P_target, working_data)
+        cosine_after_iter = power_matrix_cosine_similarity(
+            final_power, P_target, focus_size=args.focus_size
+        )
+        # The per-iteration matrix artifacts represent the completed iteration,
+        # matching the single image saved by measure_power_matrix above.
+        np.savetxt(
+            run_dir / f"P_current_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv",
+            final_power,
+            delimiter=",",
+        )
+        if args.focus_size is not None:
+            np.savetxt(
+                run_dir
+                / f"P_current_submatrix_{args.focus_size}x{args.focus_size}_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv",
+                select_focus_submatrix(final_power, args.focus_size),
+                delimiter=",",
+            )
+        save_voltage_state(
+            run_dir / f"voltage_state_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv",
+            working_data,
+        )
         grad_array = np.asarray(grad_values, dtype=float)
         grad_norm = float(np.linalg.norm(grad_array))
         max_abs_grad = float(np.max(np.abs(grad_array))) if grad_array.size else 0.0
@@ -950,13 +1184,21 @@ def optimize_one_layer(
         )
 
         if prev_loss is not None and abs(prev_loss - final_loss) < args.loss_tol:
+            convergence_hits += 1
+        else:
+            convergence_hits = 0
+        if convergence_hits >= int(args.convergence_patience):
+            print(
+                f"Converged after {convergence_hits} consecutive loss changes below "
+                f"{args.loss_tol:.6g}."
+            )
             break
         prev_loss = final_loss
 
     if final_power is None:
         args.measure_context = f"layer{layer_index + 1:02d}_final"
         final_power = measure_power_matrix(args, working_data)
-        final_loss = power_matrix_loss(final_power, P_target)
+        final_loss = optimization_loss(args, final_power, P_target, working_data)
 
     append_layer_summary(
         run_dir,
@@ -968,8 +1210,8 @@ def optimize_one_layer(
             "start_loss": "" if layer_start_loss is None else float(layer_start_loss),
             "final_loss": float(final_loss),
             "iterations_completed": int(iterations_completed),
-            "active_heater_labels": ";".join(h["label"] for h in active_heaters),
-            "active_heater_ports": ";".join(str(h["port"]) for h in active_heaters),
+            "active_heater_labels": ";".join(h["label"] for h in all_active_heaters),
+            "active_heater_ports": ";".join(str(h["port"]) for h in all_active_heaters),
         },
     )
     return final_power, final_loss
@@ -987,6 +1229,10 @@ def run_optimization(args):
     if args.layer_index < 0 or args.layer_index >= cm.shape[1]:
         raise ValueError(f"--layer is 1-based and must be in [1, {cm.shape[1]}], got {args.layer}")
     args.output_count = args.N - 1
+    if args.focus_size is not None and not (1 <= int(args.focus_size) <= args.output_count):
+        raise ValueError(
+            f"--focus-size must be in [1, {args.output_count}] for N={args.N}, got {args.focus_size}"
+        )
     args.cm = cm
     args.target_thetas_array = target_thetas
     args.mzi_table_data = mzi_table
@@ -1040,10 +1286,16 @@ def run_optimization(args):
         "measure_context_prefix",
         "initial_voltage_records",
         "current_layer_index",
+        "previous_layer_compensation_heaters",
     ):
         config.pop(key, None)
     config["layer_index_0based"] = args.layer_index
     config["layer_semantics"] = "optimize_from_all_bar_through_target_layer"
+    config["loss_region"] = (
+        "full_matrix"
+        if args.focus_size is None
+        else f"top_left_{int(args.focus_size)}x{int(args.focus_size)}"
+    )
     resume_stamp = datetime.now().strftime("%Y%m%d_%H%M%S") if resume_enabled else None
     if resume_enabled:
         config["resume_layer_index_0based"] = resume_layer_index
@@ -1064,6 +1316,10 @@ def run_optimization(args):
     print("Layerwise loss optimization")
     print(f"Target layer: {args.layer} (0-based column {args.layer_index}); process layers 1..{args.layer}")
     print(f"Voltage range: [{args.v_min}, {args.v_max}], delta_v={args.delta_v}, lr={args.lr}")
+    print(
+        "Loss/similarity region: "
+        + ("full matrix" if args.focus_size is None else f"top-left {args.focus_size}x{args.focus_size}")
+    )
     print(f"dry_run={args.dry_run}, confirm_hardware={args.confirm_hardware}")
     print(f"Run dir: {run_dir}")
     if resume_enabled:
@@ -1146,9 +1402,15 @@ def run_optimization(args):
         args.measure_context = "final_bar_state"
         final_power = measure_power_matrix(args, working_data)
         final_target = build_target_power_matrix(cm, target_thetas, args.output_count, args.layer_index)
-        final_loss = power_matrix_loss(final_power, final_target)
+        final_loss = power_matrix_loss(final_power, final_target, focus_size=args.focus_size)
 
     np.savetxt(run_dir / "final_power_matrix.csv", final_power, delimiter=",")
+    if args.focus_size is not None:
+        np.savetxt(
+            run_dir / f"final_power_submatrix_{args.focus_size}x{args.focus_size}.csv",
+            select_focus_submatrix(final_power, args.focus_size),
+            delimiter=",",
+        )
     save_voltage_state(run_dir / "final_voltage.csv", working_data)
     print(f"Final loss: {final_loss:.6g}")
     print("Saved final voltage and power matrix.")
@@ -1165,6 +1427,16 @@ def build_arg_parser():
     parser.add_argument("--N", type=int, default=9)
     parser.add_argument("--layer", type=int, required=True, help="1-based target layer to optimize through from all-Bar.")
     parser.add_argument("--target-thetas", required=True, help="Target theta file path, .csv or .npy.")
+    parser.add_argument(
+        "--focus-size",
+        type=int,
+        default=None,
+        help=(
+            "Restrict loss and cosine similarity to the top-left KxK power submatrix. "
+            "MZIs with no theoretical influence on this region are target-mapped once and not iterated. "
+            "Default: use the full matrix."
+        ),
+    )
     parser.add_argument("--mzi-table", default=os.path.join("Scandata", "MZI_table.json"))
     parser.add_argument("--inter-cali-pairs", default=os.path.join("Scandata", "inter_cali_pairs.json"))
     parser.add_argument("--bw-dir", default=os.path.join("Scandata", "BW"))
@@ -1174,8 +1446,44 @@ def build_arg_parser():
     parser.add_argument("--delta-v", type=positive_float, default=0.02)
     parser.add_argument("--lr", type=positive_float, default=0.1)
     parser.add_argument("--max-step-v", type=positive_float, default=0.1)
+    parser.add_argument(
+        "--couple-previous-layer",
+        type=parse_bool,
+        default=False,
+        help=(
+            "After each current-layer heater sweep, optimize focus-influential heaters "
+            "from the immediately previous layer against the current final target."
+        ),
+    )
+    parser.add_argument(
+        "--previous-layer-max-step-v",
+        type=positive_float,
+        default=0.05,
+        help="Maximum voltage update for one previous-layer compensation step.",
+    )
+    parser.add_argument(
+        "--previous-layer-max-offset-v",
+        type=positive_float,
+        default=0.20,
+        help="Maximum absolute previous-layer voltage displacement from its layer-entry checkpoint.",
+    )
+    parser.add_argument(
+        "--previous-layer-regularization",
+        type=float,
+        default=0.001,
+        help="Penalty coefficient for squared previous-layer voltage displacement.",
+    )
     parser.add_argument("--max-iter", type=int, default=20)
     parser.add_argument("--loss-tol", type=positive_float, default=1e-4)
+    parser.add_argument(
+        "--convergence-patience",
+        type=int,
+        default=1,
+        help=(
+            "Require this many consecutive iteration-to-iteration loss changes below "
+            "--loss-tol before stopping. Use 3 for noisy coupled hardware optimization."
+        ),
+    )
     parser.add_argument("--settle-time", type=float, default=0.5)
     parser.add_argument("--dry-run", type=parse_bool, default=True)
     parser.add_argument("--confirm-hardware", type=parse_bool, default=False)
@@ -1207,6 +1515,10 @@ def main():
         raise ValueError("--N must be >= 2")
     if args.v_min > args.v_max:
         raise ValueError("--v-min must be <= --v-max")
+    if args.previous_layer_regularization < 0:
+        raise ValueError("--previous-layer-regularization must be >= 0")
+    if args.convergence_patience < 1:
+        raise ValueError("--convergence-patience must be >= 1")
     if args.init_mode != "bar" and not (args.resume_run_dir or args.resume_voltage_file):
         raise RuntimeError("Resume/current initialization is disabled; every run must start from all-Bar.")
     if not args.dry_run and not args.confirm_hardware:

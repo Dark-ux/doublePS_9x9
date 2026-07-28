@@ -1,0 +1,192 @@
+{
+  "timestamp": "2026-07-23 10:27:33",
+  "state_after_measurement": "mesh all-bar; all input switches OFF",
+  "matrix_shape": [
+    8,
+    8
+  ],
+  "matrix_csv": "results\\AllBarMeasurement\\run_20260723_102627\\all_bar_transfer_matrix.csv",
+  "matrix_png": "results\\AllBarMeasurement\\run_20260723_102627\\all_bar_transfer_matrix.png",
+  "bar_voltages": [
+    {
+      "mzi": 1,
+      "port": 65,
+      "bar_voltage_v": 4.694
+    },
+    {
+      "mzi": 2,
+      "port": 67,
+      "bar_voltage_v": 4.427
+    },
+    {
+      "mzi": 3,
+      "port": 66,
+      "bar_voltage_v": 4.294
+    },
+    {
+      "mzi": 4,
+      "port": 68,
+      "bar_voltage_v": 4.309
+    },
+    {
+      "mzi": 5,
+      "port": 11,
+      "bar_voltage_v": 4.0
+    },
+    {
+      "mzi": 6,
+      "port": 12,
+      "bar_voltage_v": 4.191
+    },
+    {
+      "mzi": 7,
+      "port": 13,
+      "bar_voltage_v": 4.039
+    },
+    {
+      "mzi": 8,
+      "port": 14,
+      "bar_voltage_v": 4.0
+    },
+    {
+      "mzi": 9,
+      "port": 76,
+      "bar_voltage_v": 4.133
+    },
+    {
+      "mzi": 10,
+      "port": 75,
+      "bar_voltage_v": 4.57
+    },
+    {
+      "mzi": 11,
+      "port": 74,
+      "bar_voltage_v": 4.394
+    },
+    {
+      "mzi": 12,
+      "port": 73,
+      "bar_voltage_v": 4.16
+    },
+    {
+      "mzi": 13,
+      "port": 19,
+      "bar_voltage_v": 4.119
+    },
+    {
+      "mzi": 14,
+      "port": 20,
+      "bar_voltage_v": 4.285
+    },
+    {
+      "mzi": 15,
+      "port": 21,
+      "bar_voltage_v": 4.157
+    },
+    {
+      "mzi": 16,
+      "port": 22,
+      "bar_voltage_v": 3.957
+    },
+    {
+      "mzi": 17,
+      "port": 84,
+      "bar_voltage_v": 4.004
+    },
+    {
+      "mzi": 18,
+      "port": 83,
+      "bar_voltage_v": 4.269
+    },
+    {
+      "mzi": 19,
+      "port": 82,
+      "bar_voltage_v": 4.255
+    },
+    {
+      "mzi": 20,
+      "port": 81,
+      "bar_voltage_v": 4.131
+    },
+    {
+      "mzi": 21,
+      "port": 27,
+      "bar_voltage_v": 3.886
+    },
+    {
+      "mzi": 22,
+      "port": 28,
+      "bar_voltage_v": 3.894
+    },
+    {
+      "mzi": 23,
+      "port": 29,
+      "bar_voltage_v": 4.058
+    },
+    {
+      "mzi": 24,
+      "port": 26,
+      "bar_voltage_v": 4.084
+    },
+    {
+      "mzi": 25,
+      "port": 100,
+      "bar_voltage_v": 3.921
+    },
+    {
+      "mzi": 26,
+      "port": 99,
+      "bar_voltage_v": 4.196
+    },
+    {
+      "mzi": 27,
+      "port": 102,
+      "bar_voltage_v": 3.972
+    },
+    {
+      "mzi": 28,
+      "port": 101,
+      "bar_voltage_v": 4.228
+    },
+    {
+      "mzi": 29,
+      "port": 33,
+      "bar_voltage_v": 3.928
+    },
+    {
+      "mzi": 30,
+      "port": 38,
+      "bar_voltage_v": 4.057
+    },
+    {
+      "mzi": 31,
+      "port": 36,
+      "bar_voltage_v": 4.0
+    },
+    {
+      "mzi": 32,
+      "port": 40,
+      "bar_voltage_v": 3.992
+    },
+    {
+      "mzi": 33,
+      "port": 106,
+      "bar_voltage_v": 4.235
+    },
+    {
+      "mzi": 34,
+      "port": 108,
+      "bar_voltage_v": 4.535
+    },
+    {
+      "mzi": 35,
+      "port": 105,
+      "bar_voltage_v": 4.628
+    },
+    {
+      "mzi": 36,
+      "port": 107,
+      "bar_voltage_v": 4.604
+    }
+  ]
+}

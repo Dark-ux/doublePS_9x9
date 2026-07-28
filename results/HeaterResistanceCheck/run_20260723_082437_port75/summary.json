@@ -1,0 +1,15 @@
+{
+  "port": 75,
+  "voltage_range_v": [
+    0.5,
+    2.5
+  ],
+  "voltage_step_v": 0.5,
+  "fit_model": "V = R * I + b",
+  "resistance_ohm": 589.5517869889297,
+  "offset_current_a": 1.1703403502095414e-05,
+  "offset_current_mA": 0.011703403502095413,
+  "configured_resistance_ohm": 542.2481278088666,
+  "relative_change_vs_config": 0.08723618718834358,
+  "hardware_cleared_after_scan": true
+}

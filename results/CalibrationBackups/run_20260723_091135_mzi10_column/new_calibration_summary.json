@@ -1,0 +1,162 @@
+{
+  "inner_target": 10,
+  "inter_targets": [
+    9,
+    10,
+    11,
+    12
+  ],
+  "inner_results": [
+    {
+      "mzi_id": 10,
+      "arm_index": 0,
+      "arm_name": "upper",
+      "port": 75,
+      "heater_R": 591.3818705265634,
+      "Ppi": 0.016793879537004074,
+      "A": 125.87697103673885,
+      "w": 187.06771396493141,
+      "phi": 1.246867186422259,
+      "b": 127.97687020065834,
+      "bar_voltage_v": 4.57,
+      "bar_power_w": 0.03531937343710109,
+      "cross_voltage_v": 5.551,
+      "cross_power_w": 0.05211325297410517,
+      "half_power_voltage_v": 3.99,
+      "half_power_w": 0.026922433668599057,
+      "data_path": "Scandata\\inner_cali_powerdata\\10-u.txt",
+      "fine_scan_info": {
+        "special_points": [
+          {
+            "type": "max",
+            "power_w": 0.03536153214778186
+          },
+          {
+            "type": "min",
+            "power_w": 0.052163639996828826
+          },
+          {
+            "type": "half_rising",
+            "power_w": 0.02696047822325837
+          }
+        ],
+        "fine_windows": [
+          [
+            0.02596,
+            0.02796
+          ],
+          [
+            0.034362,
+            0.036362
+          ],
+          [
+            0.051164,
+            0.053164
+          ]
+        ],
+        "fine_step_w": 0.0001
+      }
+    },
+    {
+      "mzi_id": 10,
+      "arm_index": 1,
+      "arm_name": "lower",
+      "port": 71,
+      "heater_R": 516.7381927827232,
+      "Ppi": 0.01768184077336441,
+      "A": 129.23705970898362,
+      "w": 177.67339350336354,
+      "phi": 1.9453852341060234,
+      "b": 130.24974168377182,
+      "bar_voltage_v": 4.145,
+      "bar_power_w": 0.033255381030118075,
+      "cross_voltage_v": 5.13,
+      "cross_power_w": 0.05093722180348249,
+      "half_power_voltage_v": 5.558,
+      "half_power_w": 0.05977814219016469,
+      "data_path": "Scandata\\inner_cali_powerdata\\10-d.txt",
+      "fine_scan_info": {
+        "special_points": [
+          {
+            "type": "max",
+            "power_w": 0.03325244160389499
+          },
+          {
+            "type": "min",
+            "power_w": 0.0509391664223431
+          },
+          {
+            "type": "half_rising",
+            "power_w": 0.05978252883156715
+          }
+        ],
+        "fine_windows": [
+          [
+            0.032252,
+            0.034252
+          ],
+          [
+            0.049939,
+            0.051939
+          ],
+          [
+            0.058783,
+            0.06
+          ]
+        ],
+        "fine_step_w": 0.0001
+      }
+    }
+  ],
+  "inter_results": [
+    {
+      "target": 9,
+      "ports": [
+        76,
+        72
+      ],
+      "upper_arm_voltage": 4.873,
+      "lower_arm_voltage": 4.945,
+      "min_x_power": 0.04737015868964402,
+      "min_dp": 8.659245674765,
+      "min_power_uW": 242.5494
+    },
+    {
+      "target": 10,
+      "ports": [
+        75,
+        71
+      ],
+      "upper_arm_voltage": 5.282,
+      "lower_arm_voltage": 4.972,
+      "min_x_power": 0.04784005584505835,
+      "min_dp": 8.5025936368,
+      "min_power_uW": 2.4178680000000004
+    },
+    {
+      "target": 11,
+      "ports": [
+        74,
+        70
+      ],
+      "upper_arm_voltage": 4.837,
+      "lower_arm_voltage": 4.689,
+      "min_x_power": 0.04263546544521207,
+      "min_dp": 7.730537772944,
+      "min_power_uW": 0.7093379
+    },
+    {
+      "target": 12,
+      "ports": [
+        73,
+        69
+      ],
+      "upper_arm_voltage": 4.639,
+      "lower_arm_voltage": 4.729,
+      "min_x_power": 0.04320471013743145,
+      "min_dp": 7.751531051961,
+      "min_power_uW": 0.2067511
+    }
+  ],
+  "backup_dir": "results\\CalibrationBackups\\run_20260723_091135_mzi10_column"
+}
