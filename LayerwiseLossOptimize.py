@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 import upload_matrix as um
 import utils.AllDecompositionUtils as du
@@ -334,19 +335,98 @@ def build_target_power_matrix(cm, target_thetas, output_count, layer_index):
     return um.theoretical_power_matrix(cm, target_thetas_for_loss, output_count)
 
 
-def select_focus_submatrix(matrix, focus_size=None):
+def focus_region_tag(focus_size, focus_row_start=1, focus_col_start=1):
+    if focus_size is None:
+        return "full_matrix"
+    row_end = int(focus_row_start) + int(focus_size) - 1
+    col_end = int(focus_col_start) + int(focus_size) - 1
+    return (
+        f"{int(focus_size)}x{int(focus_size)}_"
+        f"rows{int(focus_row_start):02d}-{row_end:02d}_"
+        f"cols{int(focus_col_start):02d}-{col_end:02d}"
+    )
+
+
+def save_target_power_artifacts(
+    run_dir,
+    cm,
+    target_thetas,
+    output_count,
+    layer_index,
+    focus_size=None,
+    focus_row_start=1,
+    focus_col_start=1,
+):
+    layer_number = int(layer_index) + 1
+    target_power = build_target_power_matrix(cm, target_thetas, output_count, layer_index)
+    np.savetxt(
+        Path(run_dir) / f"target_power_matrix_layer{layer_number:02d}.csv",
+        target_power,
+        delimiter=",",
+    )
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    image = ax.imshow(target_power, cmap="viridis", vmin=0.0, vmax=1.0, aspect="equal")
+    channel_labels = [str(index) for index in range(1, target_power.shape[0] + 1)]
+    ax.set_xticks(range(target_power.shape[1]), channel_labels[: target_power.shape[1]])
+    ax.set_yticks(range(target_power.shape[0]), channel_labels)
+    ax.set_xlabel("Input channel")
+    ax.set_ylabel("Output channel")
+    ax.set_title(f"Theoretical target power matrix through layer {layer_number}")
+    for row in range(target_power.shape[0]):
+        for col in range(target_power.shape[1]):
+            value = float(target_power[row, col])
+            ax.text(
+                col,
+                row,
+                f"{value:.3f}",
+                ha="center",
+                va="center",
+                fontsize=7,
+                color="white" if value < 0.55 else "black",
+            )
+    fig.colorbar(image, ax=ax, label="Normalized power")
+    fig.tight_layout()
+    figure_path = Path(run_dir) / f"target_power_matrix_layer{layer_number:02d}.png"
+    fig.savefig(figure_path, dpi=200)
+    plt.close(fig)
+    print(f"Saved theoretical target matrix artifacts for layer {layer_number}: {figure_path}")
+
+    if focus_size is not None:
+        region_tag = focus_region_tag(focus_size, focus_row_start, focus_col_start)
+        np.savetxt(
+            Path(run_dir)
+            / f"target_power_submatrix_{region_tag}_layer{layer_number:02d}.csv",
+            select_focus_submatrix(
+                target_power,
+                focus_size,
+                focus_row_start,
+                focus_col_start,
+            ),
+            delimiter=",",
+        )
+    return target_power
+
+
+def select_focus_submatrix(matrix, focus_size=None, focus_row_start=1, focus_col_start=1):
     matrix = np.asarray(matrix, dtype=float)
     if matrix.ndim != 2:
         raise ValueError(f"power matrix must be 2-D, got shape {matrix.shape}")
     if focus_size is None:
         return matrix
     focus_size = int(focus_size)
-    if focus_size < 1 or focus_size > min(matrix.shape):
+    row_start = int(focus_row_start) - 1
+    col_start = int(focus_col_start) - 1
+    row_end = row_start + focus_size
+    col_end = col_start + focus_size
+    if focus_size < 1:
+        raise ValueError(f"focus_size must be positive, got {focus_size}")
+    if row_start < 0 or col_start < 0 or row_end > matrix.shape[0] or col_end > matrix.shape[1]:
         raise ValueError(
-            f"focus_size must be in [1, {min(matrix.shape)}] for matrix shape {matrix.shape}, "
-            f"got {focus_size}"
+            f"focus region rows {focus_row_start}-{row_end}, cols {focus_col_start}-{col_end} "
+            f"is outside matrix shape {matrix.shape}"
         )
-    return matrix[:focus_size, :focus_size]
+    return matrix[row_start:row_end, col_start:col_end]
 
 
 def get_focus_influential_mzi_ids(
@@ -355,6 +435,8 @@ def get_focus_influential_mzi_ids(
     output_count,
     layer_index,
     focus_size,
+    focus_row_start=1,
+    focus_col_start=1,
     phase_probe=1e-2,
     influence_tol=1e-12,
 ):
@@ -365,7 +447,9 @@ def get_focus_influential_mzi_ids(
 
     layer_thetas = build_target_thetas_for_layer(cm, target_thetas, layer_index)
     baseline_power = um.theoretical_power_matrix(cm, layer_thetas, output_count)
-    baseline_focus = select_focus_submatrix(baseline_power, focus_size)
+    baseline_focus = select_focus_submatrix(
+        baseline_power, focus_size, focus_row_start, focus_col_start
+    )
     influential = []
     direct_only = []
     for mzi_id in layer_mzi_ids:
@@ -377,8 +461,14 @@ def get_focus_influential_mzi_ids(
             theta_plus[mzi_id - 1, arm_index] += float(phase_probe)
             power_minus = um.theoretical_power_matrix(cm, theta_minus, output_count)
             power_plus = um.theoretical_power_matrix(cm, theta_plus, output_count)
-            minus_delta = select_focus_submatrix(power_minus, focus_size) - baseline_focus
-            plus_delta = select_focus_submatrix(power_plus, focus_size) - baseline_focus
+            minus_delta = (
+                select_focus_submatrix(power_minus, focus_size, focus_row_start, focus_col_start)
+                - baseline_focus
+            )
+            plus_delta = (
+                select_focus_submatrix(power_plus, focus_size, focus_row_start, focus_col_start)
+                - baseline_focus
+            )
             if max(float(np.linalg.norm(minus_delta)), float(np.linalg.norm(plus_delta))) > float(
                 influence_tol
             ):
@@ -479,18 +569,40 @@ def measure_power_matrix(args, working_data):
     return P_current
 
 
-def power_matrix_loss(P_current, P_target, eps=1e-12, focus_size=None):
-    current = select_focus_submatrix(P_current, focus_size)
-    target = select_focus_submatrix(P_target, focus_size)
+def power_matrix_loss(
+    P_current,
+    P_target,
+    eps=1e-12,
+    focus_size=None,
+    focus_row_start=1,
+    focus_col_start=1,
+):
+    current = select_focus_submatrix(
+        P_current, focus_size, focus_row_start, focus_col_start
+    )
+    target = select_focus_submatrix(
+        P_target, focus_size, focus_row_start, focus_col_start
+    )
     if current.shape != target.shape:
         raise ValueError(f"current/target focused matrix shape mismatch: {current.shape} vs {target.shape}")
     diff = current - target
     return float(np.sum(diff**2) / (np.sum(target**2) + eps))
 
 
-def power_matrix_cosine_similarity(P_current, P_target, eps=1e-12, focus_size=None):
-    current = select_focus_submatrix(P_current, focus_size).ravel()
-    target = select_focus_submatrix(P_target, focus_size).ravel()
+def power_matrix_cosine_similarity(
+    P_current,
+    P_target,
+    eps=1e-12,
+    focus_size=None,
+    focus_row_start=1,
+    focus_col_start=1,
+):
+    current = select_focus_submatrix(
+        P_current, focus_size, focus_row_start, focus_col_start
+    ).ravel()
+    target = select_focus_submatrix(
+        P_target, focus_size, focus_row_start, focus_col_start
+    ).ravel()
     denom = float(np.linalg.norm(current) * np.linalg.norm(target))
     if denom <= eps:
         return 0.0
@@ -498,7 +610,13 @@ def power_matrix_cosine_similarity(P_current, P_target, eps=1e-12, focus_size=No
 
 
 def optimization_loss(args, P_current, P_target, working_data):
-    loss = power_matrix_loss(P_current, P_target, focus_size=args.focus_size)
+    loss = power_matrix_loss(
+        P_current,
+        P_target,
+        focus_size=args.focus_size,
+        focus_row_start=args.focus_row_start,
+        focus_col_start=args.focus_col_start,
+    )
     regularization = float(getattr(args, "previous_layer_regularization", 0.0))
     compensation_heaters = getattr(args, "previous_layer_compensation_heaters", [])
     if regularization > 0.0 and compensation_heaters:
@@ -911,6 +1029,8 @@ def optimize_one_layer(
         args.output_count,
         layer_index,
         args.focus_size,
+        args.focus_row_start,
+        args.focus_col_start,
     )
     active_heaters = get_active_heater_ports(mzi_table, active_mzi_ids)
     for heater in active_heaters:
@@ -924,6 +1044,8 @@ def optimize_one_layer(
             args.output_count,
             layer_index - 1,
             args.focus_size,
+            args.focus_row_start,
+            args.focus_col_start,
         )
         previous_layer_heaters = get_active_heater_ports(mzi_table, previous_mzi_ids)
         for heater in previous_layer_heaters:
@@ -942,18 +1064,20 @@ def optimize_one_layer(
     all_active_heaters = active_heaters + previous_layer_heaters
     args.active_heaters = all_active_heaters
     P_target = build_target_power_matrix(cm, target_thetas, args.output_count, layer_index)
-    np.savetxt(run_dir / f"target_power_matrix_layer{layer_index + 1:02d}.csv", P_target, delimiter=",")
-    if args.focus_size is not None:
-        np.savetxt(
-            run_dir / f"target_power_submatrix_{args.focus_size}x{args.focus_size}_layer{layer_index + 1:02d}.csv",
-            select_focus_submatrix(P_target, args.focus_size),
-            delimiter=",",
-        )
 
     print(f"Optimizing layer {layer_index + 1}: layer MZI ids {layer_mzi_ids}")
     print(
-        f"Focus region: "
-        f"{'full matrix' if args.focus_size is None else f'top-left {args.focus_size}x{args.focus_size}'}"
+        "Focus region: "
+        + (
+            "full matrix"
+            if args.focus_size is None
+            else (
+                f"rows {args.focus_row_start}-"
+                f"{args.focus_row_start + args.focus_size - 1}, "
+                f"cols {args.focus_col_start}-"
+                f"{args.focus_col_start + args.focus_size - 1}"
+            )
+        )
     )
     if direct_only_mzi_ids:
         print(
@@ -997,7 +1121,11 @@ def optimize_one_layer(
         P_current = measure_power_matrix(args, working_data)
         loss = optimization_loss(args, P_current, P_target, working_data)
         cosine_before_iter = power_matrix_cosine_similarity(
-            P_current, P_target, focus_size=args.focus_size
+            P_current,
+            P_target,
+            focus_size=args.focus_size,
+            focus_row_start=args.focus_row_start,
+            focus_col_start=args.focus_col_start,
         )
         if layer_start_loss is None:
             layer_start_loss = float(loss)
@@ -1131,7 +1259,11 @@ def optimize_one_layer(
         final_power = measure_power_matrix(args, working_data)
         final_loss = optimization_loss(args, final_power, P_target, working_data)
         cosine_after_iter = power_matrix_cosine_similarity(
-            final_power, P_target, focus_size=args.focus_size
+            final_power,
+            P_target,
+            focus_size=args.focus_size,
+            focus_row_start=args.focus_row_start,
+            focus_col_start=args.focus_col_start,
         )
         # The per-iteration matrix artifacts represent the completed iteration,
         # matching the single image saved by measure_power_matrix above.
@@ -1141,10 +1273,18 @@ def optimize_one_layer(
             delimiter=",",
         )
         if args.focus_size is not None:
+            region_tag = focus_region_tag(
+                args.focus_size, args.focus_row_start, args.focus_col_start
+            )
             np.savetxt(
                 run_dir
-                / f"P_current_submatrix_{args.focus_size}x{args.focus_size}_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv",
-                select_focus_submatrix(final_power, args.focus_size),
+                / f"P_current_submatrix_{region_tag}_layer{layer_index + 1:02d}_iter{iter_idx:03d}.csv",
+                select_focus_submatrix(
+                    final_power,
+                    args.focus_size,
+                    args.focus_row_start,
+                    args.focus_col_start,
+                ),
                 delimiter=",",
             )
         save_voltage_state(
@@ -1233,6 +1373,17 @@ def run_optimization(args):
         raise ValueError(
             f"--focus-size must be in [1, {args.output_count}] for N={args.N}, got {args.focus_size}"
         )
+    if args.focus_row_start < 1 or args.focus_col_start < 1:
+        raise ValueError("--focus-row-start and --focus-col-start must be >= 1")
+    if args.focus_size is not None:
+        row_end = int(args.focus_row_start) + int(args.focus_size) - 1
+        col_end = int(args.focus_col_start) + int(args.focus_size) - 1
+        if row_end > args.output_count or col_end > args.output_count:
+            raise ValueError(
+                f"focus region rows {args.focus_row_start}-{row_end}, "
+                f"cols {args.focus_col_start}-{col_end} exceeds "
+                f"{args.output_count}x{args.output_count} power matrix"
+            )
     args.cm = cm
     args.target_thetas_array = target_thetas
     args.mzi_table_data = mzi_table
@@ -1294,7 +1445,9 @@ def run_optimization(args):
     config["loss_region"] = (
         "full_matrix"
         if args.focus_size is None
-        else f"top_left_{int(args.focus_size)}x{int(args.focus_size)}"
+        else focus_region_tag(
+            args.focus_size, args.focus_row_start, args.focus_col_start
+        )
     )
     resume_stamp = datetime.now().strftime("%Y%m%d_%H%M%S") if resume_enabled else None
     if resume_enabled:
@@ -1312,13 +1465,33 @@ def run_optimization(args):
         else run_dir / "target_thetas_used.csv"
     )
     np.savetxt(target_thetas_path, target_thetas, delimiter=",", header="theta1,theta2", comments="")
+    for target_layer_index in range(0, args.layer_index + 1):
+        save_target_power_artifacts(
+            run_dir,
+            cm,
+            target_thetas,
+            args.output_count,
+            target_layer_index,
+            args.focus_size,
+            args.focus_row_start,
+            args.focus_col_start,
+        )
 
     print("Layerwise loss optimization")
     print(f"Target layer: {args.layer} (0-based column {args.layer_index}); process layers 1..{args.layer}")
     print(f"Voltage range: [{args.v_min}, {args.v_max}], delta_v={args.delta_v}, lr={args.lr}")
     print(
         "Loss/similarity region: "
-        + ("full matrix" if args.focus_size is None else f"top-left {args.focus_size}x{args.focus_size}")
+        + (
+            "full matrix"
+            if args.focus_size is None
+            else (
+                f"rows {args.focus_row_start}-"
+                f"{args.focus_row_start + args.focus_size - 1}, "
+                f"cols {args.focus_col_start}-"
+                f"{args.focus_col_start + args.focus_size - 1}"
+            )
+        )
     )
     print(f"dry_run={args.dry_run}, confirm_hardware={args.confirm_hardware}")
     print(f"Run dir: {run_dir}")
@@ -1402,13 +1575,27 @@ def run_optimization(args):
         args.measure_context = "final_bar_state"
         final_power = measure_power_matrix(args, working_data)
         final_target = build_target_power_matrix(cm, target_thetas, args.output_count, args.layer_index)
-        final_loss = power_matrix_loss(final_power, final_target, focus_size=args.focus_size)
+        final_loss = power_matrix_loss(
+            final_power,
+            final_target,
+            focus_size=args.focus_size,
+            focus_row_start=args.focus_row_start,
+            focus_col_start=args.focus_col_start,
+        )
 
     np.savetxt(run_dir / "final_power_matrix.csv", final_power, delimiter=",")
     if args.focus_size is not None:
+        region_tag = focus_region_tag(
+            args.focus_size, args.focus_row_start, args.focus_col_start
+        )
         np.savetxt(
-            run_dir / f"final_power_submatrix_{args.focus_size}x{args.focus_size}.csv",
-            select_focus_submatrix(final_power, args.focus_size),
+            run_dir / f"final_power_submatrix_{region_tag}.csv",
+            select_focus_submatrix(
+                final_power,
+                args.focus_size,
+                args.focus_row_start,
+                args.focus_col_start,
+            ),
             delimiter=",",
         )
     save_voltage_state(run_dir / "final_voltage.csv", working_data)
@@ -1436,6 +1623,18 @@ def build_arg_parser():
             "MZIs with no theoretical influence on this region are target-mapped once and not iterated. "
             "Default: use the full matrix."
         ),
+    )
+    parser.add_argument(
+        "--focus-row-start",
+        type=int,
+        default=1,
+        help="1-based first output row of the square focus region. Default: 1.",
+    )
+    parser.add_argument(
+        "--focus-col-start",
+        type=int,
+        default=1,
+        help="1-based first input column of the square focus region. Default: 1.",
     )
     parser.add_argument("--mzi-table", default=os.path.join("Scandata", "MZI_table.json"))
     parser.add_argument("--inter-cali-pairs", default=os.path.join("Scandata", "inter_cali_pairs.json"))
