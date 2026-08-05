@@ -189,16 +189,73 @@ def set_layer_to_bar_voltage_pair(working_data, cm, layer_index, mzi_table, v_mi
             write_checked_port_voltage(port, float(bar_values[arm_index]), working_data, v_min, v_max)
 
 
-def voltage_from_phase_offset(base_voltage, base_phase, target_phase, ppi, heater_r, v_min, v_max):
+def fold_target_phase_to_2pi(target_phase, base_phase):
+    """Fold target phase to [0, 2*pi) before mapping it from the arm base."""
+    target_phase = float(target_phase)
+    base_phase = float(base_phase)
+    two_pi = 2.0 * np.pi
+    folded_target_phase = target_phase % two_pi
+    if np.isclose(folded_target_phase, two_pi, atol=1e-12, rtol=0.0):
+        folded_target_phase = 0.0
+    phase_offset = folded_target_phase - base_phase
+    wrap_cycles = int(np.rint((folded_target_phase - target_phase) / two_pi))
+    return float(folded_target_phase), float(phase_offset), wrap_cycles
+
+
+def resolve_voltage_phase_branch(base_voltage, base_phase, target_phase, ppi, heater_r, v_min, v_max):
+    """Find a voltage-limited branch that is phase-equivalent modulo 2*pi."""
     base_voltage = float(base_voltage)
-    phase_offset = float(target_phase) - float(base_phase)
+    folded_phase, canonical_offset, canonical_wrap_cycles = fold_target_phase_to_2pi(
+        target_phase, base_phase
+    )
     ppi = float(ppi)
     heater_r = float(heater_r)
+    v_min = float(v_min)
+    v_max = float(v_max)
+    if ppi <= 0.0 or heater_r <= 0.0:
+        raise ValueError(f"Ppi and heater_R must be positive, got Ppi={ppi}, heater_R={heater_r}.")
+    if v_min < 0.0 or v_min > v_max:
+        raise ValueError(f"Invalid voltage range [{v_min}, {v_max}].")
     base_power = base_voltage * base_voltage / heater_r
-    target_power = base_power + phase_offset / np.pi * ppi
-    target_power = max(0.0, target_power)
-    voltage = np.sqrt(target_power * heater_r)
-    return float(np.clip(voltage, float(v_min), float(v_max)))
+    canonical_power = base_power + canonical_offset / np.pi * ppi
+    canonical_voltage = (
+        float(np.sqrt(canonical_power * heater_r)) if canonical_power >= 0.0 else float("nan")
+    )
+    if np.isfinite(canonical_voltage) and canonical_voltage > v_max:
+        branch_cycles = [0] + list(range(-1, -65, -1)) + list(range(1, 65))
+    elif not np.isfinite(canonical_voltage) or canonical_voltage < v_min:
+        branch_cycles = [0] + list(range(1, 65)) + list(range(-1, -65, -1))
+    else:
+        branch_cycles = [0]
+    tolerance = 1e-12
+    for voltage_wrap_cycles in branch_cycles:
+        mapped_offset = canonical_offset + voltage_wrap_cycles * 2.0 * np.pi
+        mapped_power = base_power + mapped_offset / np.pi * ppi
+        if mapped_power < -tolerance:
+            continue
+        mapped_voltage = float(np.sqrt(max(0.0, mapped_power) * heater_r))
+        if v_min - tolerance <= mapped_voltage <= v_max + tolerance:
+            return {
+                "voltage": float(np.clip(mapped_voltage, v_min, v_max)),
+                "folded_target_phase": float(folded_phase),
+                "canonical_phase_offset": float(canonical_offset),
+                "mapped_phase_offset": float(mapped_offset),
+                "phase_wrap_cycles": int(canonical_wrap_cycles),
+                "voltage_wrap_cycles": int(voltage_wrap_cycles),
+                "total_wrap_cycles": int(canonical_wrap_cycles + voltage_wrap_cycles),
+                "canonical_voltage": canonical_voltage,
+            }
+    raise ValueError(
+        "No phase-equivalent voltage branch fits within "
+        f"[{v_min}, {v_max}] V: target_phase={target_phase}, folded_phase={folded_phase}, "
+        f"base_voltage={base_voltage}, base_phase={base_phase}, Ppi={ppi}, heater_R={heater_r}."
+    )
+
+
+def voltage_from_phase_offset(base_voltage, base_phase, target_phase, ppi, heater_r, v_min, v_max):
+    return resolve_voltage_phase_branch(
+        base_voltage, base_phase, target_phase, ppi, heater_r, v_min, v_max
+    )["voltage"]
 
 
 def set_layer_to_target_prebiased_pair(
@@ -268,7 +325,7 @@ def set_layer_to_target_prebiased_pair(
             target_phase = float(target_thetas[mzi_id - 1, arm_index])
             # inter_cali_pairs is calibrated near theta1=pi, theta2=0.
             base_phase = np.pi if arm_index == 0 else 0.0
-            initial_voltage = voltage_from_phase_offset(
+            mapping = resolve_voltage_phase_branch(
                 base_voltage,
                 base_phase,
                 target_phase,
@@ -277,6 +334,7 @@ def set_layer_to_target_prebiased_pair(
                 v_min,
                 v_max,
             )
+            initial_voltage = mapping["voltage"]
             actual_voltage = write_checked_port_voltage(port, initial_voltage, working_data, v_min, v_max)
             records.append(
                 {
@@ -287,7 +345,13 @@ def set_layer_to_target_prebiased_pair(
                     "base_voltage": base_voltage,
                     "base_phase": float(base_phase),
                     "target_phase": target_phase,
-                    "phase_offset": float(target_phase - base_phase),
+                    "folded_target_phase": mapping["folded_target_phase"],
+                    "phase_wrap_cycles": mapping["phase_wrap_cycles"],
+                    "voltage_wrap_cycles": mapping["voltage_wrap_cycles"],
+                    "total_wrap_cycles": mapping["total_wrap_cycles"],
+                    "canonical_phase_offset": mapping["canonical_phase_offset"],
+                    "phase_offset": mapping["mapped_phase_offset"],
+                    "canonical_voltage": mapping["canonical_voltage"],
                     "initial_voltage": actual_voltage,
                     "mode": mode,
                 }
