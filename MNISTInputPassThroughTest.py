@@ -54,6 +54,21 @@ def result_path(args, run_dir, filename):
     return os.fspath(run_dir / filename)
 
 
+def atomic_write_rows(path, rows):
+    """Checkpoint rows without leaving a partially written CSV destination."""
+    path = Path(path)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    pd.DataFrame(rows).to_csv(temp_path, index=False)
+    os.replace(temp_path, path)
+
+
+def load_checkpoint_rows(path):
+    path = Path(path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return []
+    return pd.read_csv(path).to_dict("records")
+
+
 def make_zero_working_data(channel_count=128):
     return pd.DataFrame({0: np.zeros(int(channel_count), dtype=float)})
 
@@ -149,17 +164,33 @@ def load_features(features_csv, input_count, sample_limit=None, sample_offset=0)
     return df, feature_cols, features
 
 
-def validate_features(features, sum_tol=1e-3, negative_tol=1e-12):
+def validate_features(features, sum_tol=1e-3, negative_tol=1e-12, mode="normalized"):
+    mode = str(mode).strip().lower()
+    if mode not in {"normalized", "bounded"}:
+        raise ValueError("feature validation mode must be 'normalized' or 'bounded'.")
     sums = np.sum(features, axis=1)
     finite = np.isfinite(features).all(axis=1)
     nonnegative = np.min(features, axis=1) >= -float(negative_tol)
-    sum_ok = np.abs(sums - 1.0) <= float(sum_tol)
-    valid = finite & nonnegative & sum_ok
+    upper_bound_ok = np.max(features, axis=1) <= 1.0 + float(negative_tol)
+    nonzero = sums > float(negative_tol)
+    normalized_sum_ok = np.abs(sums - 1.0) <= float(sum_tol)
+    if mode == "normalized":
+        sum_ok = normalized_sum_ok
+        valid = finite & nonnegative & sum_ok
+    else:
+        # Absolute-intensity vectors need not sum to one. Each coefficient is
+        # independently meaningful on the physical [0, 1] scale.
+        sum_ok = np.ones(len(sums), dtype=bool)
+        valid = finite & nonnegative & upper_bound_ok & nonzero
     return {
         "valid": valid,
         "finite": finite,
         "nonnegative": nonnegative,
         "sum_ok": sum_ok,
+        "normalized_sum_ok": normalized_sum_ok,
+        "upper_bound_ok": upper_bound_ok,
+        "nonzero": nonzero,
+        "mode": mode,
         "sums": sums,
         "min_values": np.min(features, axis=1),
         "max_values": np.max(features, axis=1),
@@ -1495,6 +1526,79 @@ def closed_loop_loss(target_ratio, measured_powers, eps=1e-15):
     }
 
 
+def closed_loop_absolute_baseline_loss(
+    target_coefficients,
+    target_powers,
+    measured_powers,
+    baseline_matrix,
+    power_to_uw=1e6,
+    optimization_mask=None,
+):
+    """Evaluate absolute output power error through the measured 120-uW baseline matrix."""
+    target_coefficients = np.asarray(target_coefficients, dtype=float)
+    target_powers = np.asarray(target_powers, dtype=float)
+    measured_powers = np.asarray(measured_powers, dtype=float)
+    estimated_coefficients = np.linalg.pinv(np.asarray(baseline_matrix, dtype=float)) @ measured_powers
+    coefficient_error = estimated_coefficients - target_coefficients
+    power_error = measured_powers - target_powers
+    if optimization_mask is None:
+        optimization_mask = np.ones_like(target_coefficients, dtype=bool)
+    optimization_mask = np.asarray(optimization_mask, dtype=bool)
+    if optimization_mask.shape != target_coefficients.shape or not optimization_mask.any():
+        raise ValueError("optimization_mask must select at least one target coefficient.")
+    optimized_error = coefficient_error[optimization_mask]
+    return {
+        "loss_mae": float(np.mean(np.abs(optimized_error))),
+        "loss_mse": float(np.mean(optimized_error**2)),
+        "max_abs_ratio_error": float(np.max(np.abs(optimized_error))),
+        # Keep these legacy keys so existing result readers remain compatible.
+        "measured_ratio": estimated_coefficients,
+        "output_sum": float(np.sum(measured_powers)),
+        "error": coefficient_error,
+        "optimization_mask": optimization_mask,
+        "target_powers": target_powers,
+        "power_error": power_error,
+        "power_to_uw": float(power_to_uw),
+        "power_mae_uw": float(np.mean(np.abs(power_error)) * float(power_to_uw)),
+        "power_max_abs_uw": float(np.max(np.abs(power_error)) * float(power_to_uw)),
+    }
+
+
+def closed_loop_absolute_total_power_loss(
+    target_coefficients, measured_powers, reference_power_uw, optimization_mask, power_to_uw=1e6
+):
+    """Match the sum of all measured outputs to coefficient * reference power."""
+    target_coefficients = np.asarray(target_coefficients, dtype=float)
+    optimization_mask = np.asarray(optimization_mask, dtype=bool)
+    if optimization_mask.shape != target_coefficients.shape or not optimization_mask.any():
+        raise ValueError("optimization_mask must select at least one target coefficient.")
+    target_total_uw = float(np.sum(target_coefficients[optimization_mask]) * float(reference_power_uw))
+    measured_total_uw = float(np.sum(np.asarray(measured_powers, dtype=float)) * float(power_to_uw))
+    normalized_total_error = float((measured_total_uw - target_total_uw) / float(reference_power_uw))
+    estimated_coefficients = np.zeros_like(target_coefficients, dtype=float)
+    # Image vectors are required to contain exactly one active source. Keeping
+    # this representation general still makes the update deterministic.
+    estimated_coefficients[optimization_mask] = (
+        np.sum(target_coefficients[optimization_mask]) + normalized_total_error
+    ) / int(np.sum(optimization_mask))
+    coefficient_error = estimated_coefficients - target_coefficients
+    optimized_error = coefficient_error[optimization_mask]
+    return {
+        "loss_mae": float(np.mean(np.abs(optimized_error))),
+        "loss_mse": float(np.mean(optimized_error**2)),
+        "max_abs_ratio_error": float(np.max(np.abs(optimized_error))),
+        "measured_ratio": estimated_coefficients,
+        "output_sum": float(np.sum(measured_powers)),
+        "error": coefficient_error,
+        "optimization_mask": optimization_mask,
+        "target_total_power_uw": target_total_uw,
+        "measured_total_power_uw": measured_total_uw,
+        "total_power_error_uw": measured_total_uw - target_total_uw,
+        "power_mae_uw": abs(measured_total_uw - target_total_uw),
+        "power_max_abs_uw": abs(measured_total_uw - target_total_uw),
+    }
+
+
 def upload_coefficients_and_measure(
     args,
     working_data,
@@ -1565,7 +1669,45 @@ def build_closed_loop_iter_row(
     append_vector_columns(row, "optimized_coefficient", coefficients)
     append_vector_columns(row, "upload_voltage", voltages)
     append_vector_columns(row, "output_power", measured_powers)
+    if "target_powers" in metrics:
+        append_vector_columns(row, "target_output_power", metrics["target_powers"])
+        append_vector_columns(row, "output_power_error", metrics["power_error"])
+        row["output_power_mae_uw"] = float(metrics["power_mae_uw"])
+        row["output_power_max_abs_uw"] = float(metrics["power_max_abs_uw"])
+    if "target_total_power_uw" in metrics:
+        row["target_total_power_uw"] = float(metrics["target_total_power_uw"])
+        row["measured_total_power_uw"] = float(metrics["measured_total_power_uw"])
+        row["total_power_error_uw"] = float(metrics["total_power_error_uw"])
     return row
+
+
+def print_closed_loop_live(metadata, iteration, accepted, voltages, measured_powers, metrics):
+    status = "accepted" if accepted else "rejected"
+    print(f"\n[sample {metadata['sample_index']} iter {iteration:02d} {status}]")
+    if "target_total_power_uw" in metrics:
+        measured_uw = np.asarray(measured_powers, dtype=float) * float(metrics.get("power_to_uw", 1e6))
+        print(f"  target_total_uW  : {metrics['target_total_power_uw']:.4f}")
+        print(f"  measured_total_uW: {metrics['measured_total_power_uw']:.4f}")
+        print(f"  total_delta_uW   : {metrics['total_power_error_uw']:.4f}")
+        print("  output_channels_uW: " + np.array2string(measured_uw, precision=3, suppress_small=True))
+    elif "target_powers" in metrics:
+        power_to_uw = float(metrics.get("power_to_uw", 1e6))
+        target_uw = np.asarray(metrics["target_powers"], dtype=float) * power_to_uw
+        measured_uw = np.asarray(measured_powers, dtype=float) * power_to_uw
+        error_uw = measured_uw - target_uw
+        print("  target_uW  : " + np.array2string(target_uw, precision=3, suppress_small=True))
+        print("  measured_uW: " + np.array2string(measured_uw, precision=3, suppress_small=True))
+        print("  delta_uW   : " + np.array2string(error_uw, precision=3, suppress_small=True))
+        print(
+            f"  power MAE={metrics['power_mae_uw']:.4f} uW, "
+            f"max|delta|={metrics['power_max_abs_uw']:.4f} uW"
+        )
+    else:
+        print("  target     : " + np.array2string(np.asarray(metrics["measured_ratio"]) - metrics["error"], precision=4))
+        print("  measured   : " + np.array2string(np.asarray(metrics["measured_ratio"]), precision=4))
+        print("  delta      : " + np.array2string(np.asarray(metrics["error"]), precision=4))
+    print("  voltage_V  : " + np.array2string(np.asarray(voltages), precision=3))
+    print(f"  coefficient MAE={metrics['loss_mae']:.6g}, max|error|={metrics['max_abs_ratio_error']:.6g}")
 
 
 def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, source_df, features, baseline_matrix):
@@ -1575,14 +1717,64 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
     final_voltage_long_rows = []
     iter_rows = []
     current_check_rows = []
+    power_to_uw = 1.0 if hardware is None else 1e6
+    completed_sample_ids = set()
+    completed_rows_by_id = {}
+    if should_record_results(args) and bool(getattr(args, "resume_run_dir", "")):
+        final_voltage_rows = load_checkpoint_rows(run_dir / "closed_loop_input_final_voltage.csv")
+        final_voltage_long_rows = load_checkpoint_rows(run_dir / "closed_loop_input_final_voltage_long.csv")
+        iter_rows = load_checkpoint_rows(run_dir / "closed_loop_input_iter_log.csv")
+        current_check_rows = load_checkpoint_rows(run_dir / "closed_loop_input_current_check_failures.csv")
+        if bool(getattr(args, "retry_nonconverged", False)):
+            retry_sample_ids = {
+                int(row["sample_index"])
+                for row in final_voltage_rows
+                if not parse_bool(row.get("converged", False))
+            }
+            final_voltage_rows = [
+                row for row in final_voltage_rows if int(row["sample_index"]) not in retry_sample_ids
+            ]
+            final_voltage_long_rows = [
+                row for row in final_voltage_long_rows if int(row["sample_index"]) not in retry_sample_ids
+            ]
+            iter_rows = [row for row in iter_rows if int(row["sample_index"]) not in retry_sample_ids]
+            current_check_rows = [
+                row for row in current_check_rows if int(row["sample_index"]) not in retry_sample_ids
+            ]
+            print(
+                f"Retry-nonconverged mode: retained {len(final_voltage_rows)} converged vectors; "
+                f"will recalibrate {len(retry_sample_ids)} vectors: {sorted(retry_sample_ids)}"
+            )
+        completed_sample_ids = {int(row["sample_index"]) for row in final_voltage_rows}
+        completed_rows_by_id = {int(row["sample_index"]): row for row in final_voltage_rows}
+        print(f"Resume checkpoint: {len(completed_sample_ids)} input vectors already complete.")
 
     for local_idx, feature_row in enumerate(np.asarray(features, dtype=float)):
         metadata = metadata_for_sample(source_df, local_idx)
+        if int(metadata["sample_index"]) in completed_sample_ids:
+            checkpoint_row = completed_rows_by_id[int(metadata["sample_index"])]
+            sample_outputs.append(
+                np.asarray(
+                    [checkpoint_row[f"final_output_power_{idx}"] for idx in range(int(args.output_count))],
+                    dtype=float,
+                )
+            )
+            continue
         target_ratio, target_sum = normalize_vector(feature_row, eps=args.closed_loop_output_epsilon)
         if target_sum <= float(args.closed_loop_output_epsilon):
             raise ValueError(f"sample {metadata['sample_index']} has zero feature-vector sum.")
 
-        best_coefficients = np.clip(target_ratio.astype(float), 0.0, 1.0)
+        objective = getattr(args, "closed_loop_objective", "ratio")
+        absolute_baseline_objective = objective == "absolute-baseline"
+        absolute_total_objective = objective == "absolute-total-power"
+        absolute_objective = absolute_baseline_objective or absolute_total_objective
+        target_coefficients = np.clip(np.asarray(feature_row, dtype=float), 0.0, 1.0)
+        optimization_mask = target_coefficients > float(args.closed_loop_output_epsilon)
+        if absolute_objective and not optimization_mask.any():
+            raise ValueError(f"sample {metadata['sample_index']} has no nonzero input channel to optimize.")
+        target_powers = np.asarray(baseline_matrix, dtype=float) @ target_coefficients
+        logged_target = target_coefficients if absolute_objective else target_ratio
+        best_coefficients = (target_coefficients if absolute_objective else target_ratio).copy()
         lr = float(args.closed_loop_lr)
 
         measured_powers, records, failures = upload_coefficients_and_measure(
@@ -1600,11 +1792,26 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
             current_check_rows.append(row)
 
         best_voltages = records_to_voltage_array(records, args.input_count)
-        best_metrics = closed_loop_loss(
-            target_ratio,
-            measured_powers,
-            eps=args.closed_loop_output_epsilon,
-        )
+        if absolute_total_objective:
+            best_metrics = closed_loop_absolute_total_power_loss(
+                target_coefficients,
+                measured_powers,
+                args.input_reference_power_uw,
+                optimization_mask,
+                power_to_uw=power_to_uw,
+            )
+            best_metrics["power_to_uw"] = power_to_uw
+        elif absolute_baseline_objective:
+            best_metrics = closed_loop_absolute_baseline_loss(
+                target_coefficients,
+                target_powers,
+                measured_powers,
+                baseline_matrix,
+                power_to_uw=power_to_uw,
+                optimization_mask=optimization_mask,
+            )
+        else:
+            best_metrics = closed_loop_loss(target_ratio, measured_powers, eps=args.closed_loop_output_epsilon)
         current_state_is_best = True
         initial_loss_mae = float(best_metrics["loss_mae"])
         best_powers = np.asarray(measured_powers, dtype=float)
@@ -1619,10 +1826,12 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
                 coefficients=best_coefficients,
                 voltages=best_voltages,
                 measured_powers=best_powers,
-                target_ratio=target_ratio,
+                target_ratio=logged_target,
                 metrics=best_metrics,
             )
         )
+        if args.print_each_sample:
+            print_closed_loop_live(metadata, 0, True, best_voltages, best_powers, best_metrics)
 
         iterations_executed = 0
         converged = bool(best_metrics["loss_mae"] <= float(args.closed_loop_tol))
@@ -1631,8 +1840,20 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
             if converged:
                 break
             iterations_executed = int(iteration)
-            error_for_update = target_ratio - best_metrics["measured_ratio"]
-            proposal = np.clip(best_coefficients + lr * error_for_update, 0.0, 1.0)
+            update_target = target_coefficients if absolute_objective else target_ratio
+            error_for_update = update_target - best_metrics["measured_ratio"]
+            if absolute_objective:
+                proposal = best_coefficients.copy()
+                proposal[optimization_mask] = np.clip(
+                    best_coefficients[optimization_mask] + lr * error_for_update[optimization_mask],
+                    0.0,
+                    1.0,
+                )
+                # A zero target means that input MZI must remain physically OFF;
+                # it must never be used to compensate another channel's error.
+                proposal[~optimization_mask] = 0.0
+            else:
+                proposal = np.clip(best_coefficients + lr * error_for_update, 0.0, 1.0)
             if np.allclose(proposal, best_coefficients, atol=1e-12, rtol=0.0):
                 lr *= float(args.closed_loop_lr_shrink)
                 if lr < float(args.closed_loop_min_lr):
@@ -1654,11 +1875,26 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
                 current_check_rows.append(row)
 
             voltages = records_to_voltage_array(records, args.input_count)
-            metrics = closed_loop_loss(
-                target_ratio,
-                measured_powers,
-                eps=args.closed_loop_output_epsilon,
-            )
+            if absolute_total_objective:
+                metrics = closed_loop_absolute_total_power_loss(
+                    target_coefficients,
+                    measured_powers,
+                    args.input_reference_power_uw,
+                    optimization_mask,
+                    power_to_uw=power_to_uw,
+                )
+                metrics["power_to_uw"] = power_to_uw
+            elif absolute_baseline_objective:
+                metrics = closed_loop_absolute_baseline_loss(
+                    target_coefficients,
+                    target_powers,
+                    measured_powers,
+                    baseline_matrix,
+                    power_to_uw=power_to_uw,
+                    optimization_mask=optimization_mask,
+                )
+            else:
+                metrics = closed_loop_loss(target_ratio, measured_powers, eps=args.closed_loop_output_epsilon)
             accepted = bool(
                 metrics["loss_mae"] <= best_metrics["loss_mae"] - float(args.closed_loop_min_improvement)
             )
@@ -1671,10 +1907,12 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
                     coefficients=proposal,
                     voltages=voltages,
                     measured_powers=measured_powers,
-                    target_ratio=target_ratio,
+                    target_ratio=logged_target,
                     metrics=metrics,
                 )
             )
+            if args.print_each_sample:
+                print_closed_loop_live(metadata, iteration, accepted, voltages, measured_powers, metrics)
 
             if accepted:
                 best_coefficients = proposal
@@ -1708,12 +1946,32 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
                 current_check_rows.append(row)
             best_voltages = records_to_voltage_array(final_records, args.input_count)
             best_powers = np.asarray(final_powers, dtype=float)
-            best_metrics = closed_loop_loss(
-                target_ratio,
-                best_powers,
-                eps=args.closed_loop_output_epsilon,
-            )
+            if absolute_total_objective:
+                best_metrics = closed_loop_absolute_total_power_loss(
+                    target_coefficients,
+                    best_powers,
+                    args.input_reference_power_uw,
+                    optimization_mask,
+                    power_to_uw=power_to_uw,
+                )
+                best_metrics["power_to_uw"] = power_to_uw
+            elif absolute_baseline_objective:
+                best_metrics = closed_loop_absolute_baseline_loss(
+                    target_coefficients,
+                    target_powers,
+                    best_powers,
+                    baseline_matrix,
+                    power_to_uw=power_to_uw,
+                    optimization_mask=optimization_mask,
+                )
+            else:
+                best_metrics = closed_loop_loss(target_ratio, best_powers, eps=args.closed_loop_output_epsilon)
         converged = bool(best_metrics["loss_mae"] <= float(args.closed_loop_tol))
+        if absolute_objective and np.any(np.abs(best_coefficients[~optimization_mask]) > 1e-12):
+            raise RuntimeError(
+                f"sample {metadata['sample_index']} attempted to activate a zero-target input: "
+                f"{best_coefficients.tolist()}"
+            )
 
         sample_outputs.append(best_powers)
         final_row = dict(metadata)
@@ -1729,7 +1987,7 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
                 "final_learning_rate": float(lr),
             }
         )
-        append_vector_columns(final_row, "target_ratio", target_ratio)
+        append_vector_columns(final_row, "target_ratio", logged_target)
         append_vector_columns(final_row, "final_ratio", best_metrics["measured_ratio"])
         append_vector_columns(final_row, "ratio_error", best_metrics["error"])
         append_vector_columns(final_row, "initial_coefficient", initial_coefficients)
@@ -1737,6 +1995,16 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
         append_vector_columns(final_row, "initial_voltage", initial_voltages)
         append_vector_columns(final_row, "final_voltage", best_voltages)
         append_vector_columns(final_row, "final_output_power", best_powers)
+        if absolute_objective:
+            if absolute_baseline_objective:
+                append_vector_columns(final_row, "target_output_power", target_powers)
+                append_vector_columns(final_row, "output_power_error", best_metrics["power_error"])
+            if absolute_total_objective:
+                final_row["target_total_power_uw"] = float(best_metrics["target_total_power_uw"])
+                final_row["measured_total_power_uw"] = float(best_metrics["measured_total_power_uw"])
+                final_row["total_power_error_uw"] = float(best_metrics["total_power_error_uw"])
+            final_row["final_output_power_mae_uw"] = float(best_metrics["power_mae_uw"])
+            final_row["final_output_power_max_abs_uw"] = float(best_metrics["power_max_abs_uw"])
         final_voltage_rows.append(final_row)
 
         for ch in range(int(args.input_count)):
@@ -1744,7 +2012,7 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
             long_row.update(
                 {
                     "input_channel": int(ch + 1),
-                    "target_ratio": float(target_ratio[ch]),
+                    "target_ratio": float(logged_target[ch]),
                     "final_ratio": float(best_metrics["measured_ratio"][ch]),
                     "ratio_error": float(best_metrics["error"][ch]),
                     "initial_coefficient": float(initial_coefficients[ch]),
@@ -1764,14 +2032,24 @@ def optimize_input_vectors_closed_loop(args, working_data, hardware, run_dir, so
                 f"max_err={best_metrics['max_abs_ratio_error']:.6g}, converged={converged}"
             )
 
+        if should_record_results(args):
+            atomic_write_rows(run_dir / "closed_loop_input_final_voltage_long.csv", final_voltage_long_rows)
+            atomic_write_rows(run_dir / "closed_loop_input_iter_log.csv", iter_rows)
+            if current_check_rows:
+                atomic_write_rows(run_dir / "closed_loop_input_current_check_failures.csv", current_check_rows)
+            # Write the completion marker last. Resume skips a sample only when
+            # its final-voltage row has been durably committed.
+            atomic_write_rows(run_dir / "closed_loop_input_final_voltage.csv", final_voltage_rows)
+            print(f"Checkpoint saved: {len(final_voltage_rows)}/{len(features)} complete.", flush=True)
+
     if hardware is not None:
         set_all_switches(working_data, args.input_count, "OFF")
         um.upload_v_checked(hardware["mcv"], working_data, args.v_min, args.v_max)
 
     if should_record_results(args):
-        pd.DataFrame(final_voltage_rows).to_csv(run_dir / "closed_loop_input_final_voltage.csv", index=False)
-        pd.DataFrame(final_voltage_long_rows).to_csv(run_dir / "closed_loop_input_final_voltage_long.csv", index=False)
-        pd.DataFrame(iter_rows).to_csv(run_dir / "closed_loop_input_iter_log.csv", index=False)
+        atomic_write_rows(run_dir / "closed_loop_input_final_voltage.csv", final_voltage_rows)
+        atomic_write_rows(run_dir / "closed_loop_input_final_voltage_long.csv", final_voltage_long_rows)
+        atomic_write_rows(run_dir / "closed_loop_input_iter_log.csv", iter_rows)
     if current_check_rows:
         if should_record_results(args):
             pd.DataFrame(current_check_rows).to_csv(run_dir / "closed_loop_input_current_check_failures.csv", index=False)
@@ -1825,6 +2103,9 @@ def build_expected_input_table(
     out["finite_ok"] = feature_validation["finite"]
     out["nonnegative_ok"] = feature_validation["nonnegative"]
     out["sum_ok"] = feature_validation["sum_ok"]
+    out["upper_bound_ok"] = feature_validation["upper_bound_ok"]
+    out["nonzero_ok"] = feature_validation["nonzero"]
+    out["feature_validation_mode"] = feature_validation["mode"]
     return out
 
 
@@ -1838,6 +2119,17 @@ def build_arg_parser():
     )
     parser.add_argument("--features-csv", default="features_test.csv")
     parser.add_argument("--out-dir", default=os.path.join("results", "MNISTInputPassThroughTest"))
+    parser.add_argument(
+        "--resume-run-dir",
+        default="",
+        help="Resume an interrupted recorded run and skip samples already checkpointed.",
+    )
+    parser.add_argument(
+        "--retry-nonconverged",
+        type=parse_bool,
+        default=False,
+        help="With --resume-run-dir, discard and recalibrate only rows whose converged flag is false.",
+    )
     parser.add_argument("--N", type=int, default=9)
     parser.add_argument("--mzi-table", default=os.path.join("Scandata", "MZI_table.json"))
     parser.add_argument("--switch-table", default="IN_MZI.txt")
@@ -1868,6 +2160,15 @@ def build_arg_parser():
         help="Skip this many rows from --features-csv before applying --sample-limit.",
     )
     parser.add_argument("--sum-tol", type=float, default=1e-3)
+    parser.add_argument(
+        "--feature-validation-mode",
+        choices=["normalized", "bounded"],
+        default="normalized",
+        help=(
+            "normalized requires each vector sum to one; bounded accepts absolute-intensity "
+            "vectors whose elements are in [0, 1] and whose total is nonzero."
+        ),
+    )
     parser.add_argument("--negative-tol", type=float, default=1e-12)
     parser.add_argument("--renormalize-features", type=parse_bool, default=False)
     parser.add_argument("--fail-on-invalid-feature", type=parse_bool, default=True)
@@ -1957,6 +2258,16 @@ def build_arg_parser():
         ),
     )
     parser.add_argument("--closed-loop-max-iters", type=int, default=20)
+    parser.add_argument(
+        "--closed-loop-objective",
+        choices=["ratio", "absolute-baseline", "absolute-total-power"],
+        default="ratio",
+        help=(
+            "ratio matches normalized output proportions; absolute-baseline preserves feature amplitude "
+            "and matches output powers predicted by the measured fixed-reference baseline matrix; "
+            "absolute-total-power matches sum(outputs) to coefficient * reference uW."
+        ),
+    )
     parser.add_argument("--closed-loop-lr", type=float, default=0.35)
     parser.add_argument("--closed-loop-max-lr", type=float, default=1.0)
     parser.add_argument("--closed-loop-min-lr", type=float, default=0.01)
@@ -2030,7 +2341,12 @@ def main():
 
     args.record_results = bool(not args.dry_run or args.record_dry_run)
     if args.record_results:
-        run_dir = create_run_dir(args.out_dir)
+        if args.resume_run_dir:
+            run_dir = Path(args.resume_run_dir).resolve()
+            if not run_dir.is_dir():
+                raise FileNotFoundError(f"--resume-run-dir does not exist: {run_dir}")
+        else:
+            run_dir = create_run_dir(args.out_dir)
     else:
         run_dir = None
     args.run_dir = str(run_dir) if run_dir is not None else ""
@@ -2054,6 +2370,7 @@ def main():
         features,
         sum_tol=args.sum_tol,
         negative_tol=args.negative_tol,
+        mode=args.feature_validation_mode,
     )
     expected_table = build_expected_input_table(
         feature_df,
@@ -2169,7 +2486,10 @@ def main():
             np.savetxt(run_dir / "switch_on_power_matrix_raw.csv", baseline_raw, delimiter=",")
             np.savetxt(run_dir / "switch_on_power_matrix_norm.csv", baseline_norm, delimiter=",")
 
-    if is_fixed_reference_power_mode(args.input_upload_mode):
+    total_power_objective = bool(
+        args.closed_loop_input and args.closed_loop_objective == "absolute-total-power"
+    )
+    if is_fixed_reference_power_mode(args.input_upload_mode) and not total_power_objective:
         if hardware is not None:
             reference_raw, reference_norm, reference_route_rows = measure_reference_power_transmission(
                 args,
@@ -2186,6 +2506,15 @@ def main():
                 np.savetxt(run_dir / "switch_reference_power_matrix_norm.csv", reference_norm, delimiter=",")
                 pd.DataFrame(reference_route_rows).to_csv(run_dir / "switch_reference_route_check.csv", index=False)
         comparison_baseline_raw = reference_raw
+    elif total_power_objective:
+        # The total-power loop has an explicit physical target in uW and must
+        # not derive its target from a measured baseline whose reference plane
+        # may use a different scale.
+        comparison_baseline_raw = (
+            build_dry_run_baseline(args.input_count)
+            * float(args.input_reference_power_uw)
+            * (1.0 if hardware is None else 1e-6)
+        )
     else:
         comparison_baseline_raw = baseline_raw
 
@@ -2303,6 +2632,7 @@ def main():
         "features_csv": os.fspath(args.features_csv),
         "sample_count": int(len(feature_df)),
         "feature_columns": feature_cols,
+        "feature_validation_mode": str(feature_validation["mode"]),
         "invalid_feature_rows": int((~feature_validation["valid"]).sum()),
         "feature_sum_min": float(np.min(feature_validation["sums"])),
         "feature_sum_max": float(np.max(feature_validation["sums"])),

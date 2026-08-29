@@ -1,0 +1,101 @@
+{
+  "features_csv": "D:\\PyCharm_Projects\\doublePS8x8\\Pictue_Process\\prepared\\04_single_port_input_coefficients_mzi8.csv",
+  "input_voltage_file": "D:\\PyCharm_Projects\\doublePS8x8\\Pictue_Process\\results\\InputCalibration\\run_20260828_114209\\closed_loop_input_final_voltage.csv",
+  "network_voltage_file": "D:\\PyCharm_Projects\\doublePS8x8\\Pictue_Process\\edge detection kernel\\final_voltage.csv",
+  "out_dir": "D:\\PyCharm_Projects\\doublePS8x8\\Pictue_Process\\results\\EdgeDetectionExperiment",
+  "resume_run_dir": null,
+  "sample_limit": null,
+  "sample_offset": 0,
+  "settle_time": 0.5,
+  "v_min": 0.0,
+  "v_max": 5.5,
+  "ser_address": "COM3",
+  "opm_address": "TCPIP0::192.168.0.7::inst0::INSTR",
+  "switch_current_check": true,
+  "switch_current_tolerance": 0.1,
+  "max_upload_attempts": 3,
+  "input_reference_power_uw": 120.0,
+  "max_output_total_uw": 120.0,
+  "output_power_tolerance_uw": 1.0,
+  "fail_on_output_power_limit": false,
+  "off_voltage_tolerance_v": 0.001,
+  "repair_csv": "D:\\PyCharm_Projects\\doublePS8x8\\Pictue_Process\\results\\EdgeDetectionExperiment\\run_20260828_232435\\edge_detection_output_power.csv",
+  "repair_sample_indices": "79,104,152,200,237,300,302,375,440,445,451,470,472,475,498,503,531,535,564,655,858,870,908",
+  "repair_residual_threshold_uw": 10.0,
+  "print_every": 1,
+  "confirm_hardware": true,
+  "sample_count": 23,
+  "repair_mode": true,
+  "repair_reason_by_sample": {
+    "908": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "655": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "531": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "535": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "152": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "300": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "302": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "564": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "440": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "445": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "451": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "200": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "79": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "470": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "472": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "858": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "475": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "375": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "870": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "104": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "237": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "498": [
+      "explicit_power_anomaly_remeasure"
+    ],
+    "503": [
+      "explicit_power_anomaly_remeasure"
+    ]
+  },
+  "output_csv": "D:\\PyCharm_Projects\\doublePS8x8\\Pictue_Process\\results\\EdgeDetectionExperiment\\run_20260829_010631\\edge_detection_output_power.csv"
+}
