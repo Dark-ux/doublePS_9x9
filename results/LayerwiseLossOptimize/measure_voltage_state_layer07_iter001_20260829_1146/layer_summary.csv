@@ -1,0 +1,2 @@
+global_target_layer,current_layer,layer_status,skip_reason,start_loss,final_loss,iterations_completed,active_heater_labels,active_heater_ports
+7,7,optimized,,,0.03136696703162371,0,MZI25_arm0;MZI25_arm1;MZI26_arm0;MZI26_arm1;MZI27_arm0;MZI27_arm1;MZI28_arm0;MZI28_arm1,100;104;99;103;102;98;101;97
