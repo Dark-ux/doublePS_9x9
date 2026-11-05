@@ -1,0 +1,519 @@
+{
+  "ser_address": "COM3",
+  "mzi_table": "Scandata/MZI_table.json",
+  "switch_table": "IN_MZI.txt",
+  "out_dir": null,
+  "relative_tolerance": 0.1,
+  "samples": 3,
+  "confirm_hardware": true,
+  "started_at": "2026-09-23T09:57:53",
+  "test_voltage_v": 1.0,
+  "max_test_uploads": 10,
+  "minimum_current_mA": 0.01,
+  "heaters": [
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 1,
+      "arm_index": 0,
+      "port": 43,
+      "configured_resistance_ohm": 509.3274168280728
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 2,
+      "arm_index": 0,
+      "port": 45,
+      "configured_resistance_ohm": 509.3274168280728
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 3,
+      "arm_index": 0,
+      "port": 41,
+      "configured_resistance_ohm": 514.4778300077395
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 4,
+      "arm_index": 0,
+      "port": 48,
+      "configured_resistance_ohm": 509.33194693518095
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 5,
+      "arm_index": 0,
+      "port": 44,
+      "configured_resistance_ohm": 517.265519403624
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 6,
+      "arm_index": 0,
+      "port": 46,
+      "configured_resistance_ohm": 513.6059485938734
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 7,
+      "arm_index": 0,
+      "port": 42,
+      "configured_resistance_ohm": 510.1755478693103
+    },
+    {
+      "heater_type": "input_switch",
+      "mzi_id": 8,
+      "arm_index": 0,
+      "port": 49,
+      "configured_resistance_ohm": 514.6445493655262
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 1,
+      "arm_index": 0,
+      "port": 65,
+      "configured_resistance_ohm": 514.1361980539363
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 2,
+      "arm_index": 0,
+      "port": 67,
+      "configured_resistance_ohm": 503.9554826555818
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 3,
+      "arm_index": 0,
+      "port": 66,
+      "configured_resistance_ohm": 498.3646816458423
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 4,
+      "arm_index": 0,
+      "port": 68,
+      "configured_resistance_ohm": 514.1361980539345
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 5,
+      "arm_index": 0,
+      "port": 11,
+      "configured_resistance_ohm": 512.0640000350635
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 5,
+      "arm_index": 1,
+      "port": 7,
+      "configured_resistance_ohm": 509.8400242919656
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 6,
+      "arm_index": 0,
+      "port": 12,
+      "configured_resistance_ohm": 514.1361980539365
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 6,
+      "arm_index": 1,
+      "port": 8,
+      "configured_resistance_ohm": 514.6538964400621
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 7,
+      "arm_index": 0,
+      "port": 13,
+      "configured_resistance_ohm": 511.3774400151507
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 7,
+      "arm_index": 1,
+      "port": 9,
+      "configured_resistance_ohm": 511.5557342129538
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 8,
+      "arm_index": 0,
+      "port": 14,
+      "configured_resistance_ohm": 514.1317715531885
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 8,
+      "arm_index": 1,
+      "port": 10,
+      "configured_resistance_ohm": 513.6152391977142
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 9,
+      "arm_index": 0,
+      "port": 76,
+      "configured_resistance_ohm": 515.3478903835618
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 9,
+      "arm_index": 1,
+      "port": 72,
+      "configured_resistance_ohm": 516.2115913566885
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 10,
+      "arm_index": 0,
+      "port": 75,
+      "configured_resistance_ohm": 591.3818705265634
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 10,
+      "arm_index": 1,
+      "port": 71,
+      "configured_resistance_ohm": 516.7381927827232
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 11,
+      "arm_index": 0,
+      "port": 74,
+      "configured_resistance_ohm": 513.2659336360618
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 11,
+      "arm_index": 1,
+      "port": 70,
+      "configured_resistance_ohm": 515.6908871618543
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 12,
+      "arm_index": 0,
+      "port": 73,
+      "configured_resistance_ohm": 518.8484989600095
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 12,
+      "arm_index": 1,
+      "port": 69,
+      "configured_resistance_ohm": 517.6158092222656
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 13,
+      "arm_index": 0,
+      "port": 19,
+      "configured_resistance_ohm": 515.872379734469
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 13,
+      "arm_index": 1,
+      "port": 15,
+      "configured_resistance_ohm": 513.2659336360617
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 14,
+      "arm_index": 0,
+      "port": 20,
+      "configured_resistance_ohm": 512.4072808050088
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 14,
+      "arm_index": 1,
+      "port": 16,
+      "configured_resistance_ohm": 508.4817550515487
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 15,
+      "arm_index": 0,
+      "port": 21,
+      "configured_resistance_ohm": 511.89419902401266
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 15,
+      "arm_index": 1,
+      "port": 17,
+      "configured_resistance_ohm": 510.3487706841109
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 16,
+      "arm_index": 0,
+      "port": 22,
+      "configured_resistance_ohm": 505.95816485201095
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 16,
+      "arm_index": 1,
+      "port": 18,
+      "configured_resistance_ohm": 509.33194693518277
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 17,
+      "arm_index": 0,
+      "port": 84,
+      "configured_resistance_ohm": 512.2326453225982
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 17,
+      "arm_index": 1,
+      "port": 80,
+      "configured_resistance_ohm": 516.2163076572187
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 18,
+      "arm_index": 0,
+      "port": 83,
+      "configured_resistance_ohm": 519.0299314222328
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 18,
+      "arm_index": 1,
+      "port": 79,
+      "configured_resistance_ohm": 511.8941990240126
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 19,
+      "arm_index": 0,
+      "port": 82,
+      "configured_resistance_ohm": 516.2115913566885
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 19,
+      "arm_index": 1,
+      "port": 78,
+      "configured_resistance_ohm": 518.1450549805647
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 20,
+      "arm_index": 0,
+      "port": 81,
+      "configured_resistance_ohm": 512.0640000350625
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 20,
+      "arm_index": 1,
+      "port": 77,
+      "configured_resistance_ohm": 513.4408163499965
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 21,
+      "arm_index": 0,
+      "port": 27,
+      "configured_resistance_ohm": 520.2666806586822
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 21,
+      "arm_index": 1,
+      "port": 23,
+      "configured_resistance_ohm": 519.0229205586397
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 22,
+      "arm_index": 0,
+      "port": 28,
+      "configured_resistance_ohm": 521.1519958260816
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 22,
+      "arm_index": 1,
+      "port": 24,
+      "configured_resistance_ohm": 525.1175465365234
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 23,
+      "arm_index": 0,
+      "port": 29,
+      "configured_resistance_ohm": 510.5292982664572
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 23,
+      "arm_index": 1,
+      "port": 25,
+      "configured_resistance_ohm": 511.3817957574308
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 24,
+      "arm_index": 0,
+      "port": 26,
+      "configured_resistance_ohm": 509.33194693518107
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 24,
+      "arm_index": 1,
+      "port": 30,
+      "configured_resistance_ohm": 510.52085848376345
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 25,
+      "arm_index": 0,
+      "port": 100,
+      "configured_resistance_ohm": 488.47677429544194
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 25,
+      "arm_index": 1,
+      "port": 104,
+      "configured_resistance_ohm": 512.4072808050087
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 26,
+      "arm_index": 0,
+      "port": 99,
+      "configured_resistance_ohm": 515.347890383562
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 26,
+      "arm_index": 1,
+      "port": 103,
+      "configured_resistance_ohm": 513.2659336360588
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 27,
+      "arm_index": 0,
+      "port": 102,
+      "configured_resistance_ohm": 512.5803057759402
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 27,
+      "arm_index": 1,
+      "port": 98,
+      "configured_resistance_ohm": 509.5044815813442
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 28,
+      "arm_index": 0,
+      "port": 101,
+      "configured_resistance_ohm": 509.50448158134316
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 28,
+      "arm_index": 1,
+      "port": 97,
+      "configured_resistance_ohm": 518.8484989600064
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 29,
+      "arm_index": 0,
+      "port": 33,
+      "configured_resistance_ohm": 513.2701060266568
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 29,
+      "arm_index": 1,
+      "port": 34,
+      "configured_resistance_ohm": 512.7510218079893
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 30,
+      "arm_index": 0,
+      "port": 38,
+      "configured_resistance_ohm": 512.9298317521508
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 30,
+      "arm_index": 1,
+      "port": 35,
+      "configured_resistance_ohm": 510.1846535453303
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 31,
+      "arm_index": 0,
+      "port": 36,
+      "configured_resistance_ohm": 509.331946935181
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 31,
+      "arm_index": 1,
+      "port": 37,
+      "configured_resistance_ohm": 511.3817957574307
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 32,
+      "arm_index": 0,
+      "port": 40,
+      "configured_resistance_ohm": 511.89419902401255
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 32,
+      "arm_index": 1,
+      "port": 39,
+      "configured_resistance_ohm": 513.7861779903174
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 33,
+      "arm_index": 0,
+      "port": 106,
+      "configured_resistance_ohm": 515.3478903835618
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 34,
+      "arm_index": 0,
+      "port": 108,
+      "configured_resistance_ohm": 514.136198053936
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 35,
+      "arm_index": 0,
+      "port": 105,
+      "configured_resistance_ohm": 517.0962998222063
+    },
+    {
+      "heater_type": "network",
+      "mzi_id": 36,
+      "arm_index": 0,
+      "port": 107,
+      "configured_resistance_ohm": 516.397588508255
+    }
+  ]
+}

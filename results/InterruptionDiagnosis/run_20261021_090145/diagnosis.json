@@ -1,0 +1,43 @@
+{
+  "checked_at": "2026-10-21T09:01:41",
+  "previous_terminal_error": "pyvisa.errors.VisaIOError: VI_ERROR_CONN_LOST (-1073807194): The connection for the given session has been lost.",
+  "previous_terminal_stack_operation": "pyvisa.resources.messagebased.write_raw -> visalib.write -> viWrite",
+  "visa_address": "TCPIP0::192.168.0.7::inst0::INSTR",
+  "operation": "Read-only identification and power queries, no voltage upload or instrument settings changed",
+  "current_idn": "Keysight Technologies, N7745A, MY48103175, 1.183",
+  "current_power_queries": [
+    {
+      "channel": 1,
+      "reply": "+2.22854800E-007"
+    },
+    {
+      "channel": 2,
+      "reply": "+1.47027200E-006"
+    },
+    {
+      "channel": 3,
+      "reply": "+2.18504500E-006"
+    },
+    {
+      "channel": 4,
+      "reply": "+9.20540500E-006"
+    },
+    {
+      "channel": 5,
+      "reply": "+1.80156000E-004"
+    },
+    {
+      "channel": 6,
+      "reply": "+7.37065300E-005"
+    },
+    {
+      "channel": 7,
+      "reply": "+1.56079500E-004"
+    },
+    {
+      "channel": 8,
+      "reply": "+4.61698300E-006"
+    }
+  ],
+  "current_communication_ok": true
+}

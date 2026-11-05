@@ -1,0 +1,22 @@
+{
+  "started_at": "2026-10-20T17:26:44",
+  "serial_port": "COM3",
+  "baudrate": 115200,
+  "writes": "current query commands only; voltage unchanged",
+  "valid_readings_per_sample": [
+    128,
+    128,
+    128
+  ],
+  "nonzero_ports_per_sample": [
+    [],
+    [],
+    []
+  ],
+  "max_abs_current_mA_per_sample": [
+    0.0004388766271629476,
+    0.00042247002427836847,
+    0.0004142667228360555
+  ],
+  "serial_open_ok": true
+}

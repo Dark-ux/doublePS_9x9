@@ -1,0 +1,608 @@
+{
+  "finished_at": "2026-10-20T17:31:08",
+  "conclusion": "Devices are reachable, but voltage command/current feedback reliability is not normal. No direct output-voltage measurement is available in the current protocol implementation.",
+  "baseline": {
+    "started_at": "2026-10-20T17:26:44",
+    "serial_port": "COM3",
+    "baudrate": 115200,
+    "writes": "current query commands only; voltage unchanged",
+    "valid_readings_per_sample": [
+      128,
+      128,
+      128
+    ],
+    "nonzero_ports_per_sample": [
+      [],
+      [],
+      []
+    ],
+    "max_abs_current_mA_per_sample": [
+      0.0004388766271629476,
+      0.00042247002427836847,
+      0.0004142667228360555
+    ],
+    "serial_open_ok": true
+  },
+  "optical_power_meter": {
+    "visa_address": "TCPIP0::192.168.0.7::inst0::INSTR",
+    "idn": "Keysight Technologies, N7745A, MY48103175, 1.183",
+    "communication_ok": true
+  },
+  "original_1v_test": {
+    "passed_heaters": 72,
+    "total_heaters": 72,
+    "uploads_required": 9,
+    "zero_uploads_required": 6,
+    "max_abs_current_error_percent": 5.0545844067166446,
+    "max_abs_inferred_resistance_error_percent": 5.323674002722689
+  },
+  "paced_20ms_test": {
+    "started_at": "2026-10-20T17:28:52",
+    "test_voltage_v": 1.0,
+    "command_delay_s": 0.02,
+    "samples_per_state": 3,
+    "cycles_requested": 3,
+    "voltage_measurement": "Setpoint only; measured feedback is current",
+    "final_zero_verified": true,
+    "phases": [
+      {
+        "phase": "cycle1_1v",
+        "normal_count": 28,
+        "heater_count": 72,
+        "abnormal": [
+          {
+            "port": 43,
+            "status": "UNSTABLE",
+            "current_mA": 1.9491656413574718
+          },
+          {
+            "port": 45,
+            "status": "UNSTABLE",
+            "current_mA": 0.26744813527252087
+          },
+          {
+            "port": 48,
+            "status": "NO_CURRENT",
+            "current_mA": -0.031266883447318886
+          },
+          {
+            "port": 44,
+            "status": "UNSTABLE",
+            "current_mA": 1.922980376654105
+          },
+          {
+            "port": 46,
+            "status": "MISMATCH",
+            "current_mA": 0.2681782291008854
+          },
+          {
+            "port": 49,
+            "status": "NO_CURRENT",
+            "current_mA": -0.03217744990741393
+          },
+          {
+            "port": 8,
+            "status": "NO_CURRENT",
+            "current_mA": -0.058706926771805695
+          },
+          {
+            "port": 14,
+            "status": "NO_CURRENT",
+            "current_mA": 1.9131609023903402
+          },
+          {
+            "port": 76,
+            "status": "MISMATCH",
+            "current_mA": 0.2672922725451172
+          },
+          {
+            "port": 72,
+            "status": "UNSTABLE",
+            "current_mA": 1.87715616342319
+          },
+          {
+            "port": 75,
+            "status": "MISMATCH",
+            "current_mA": 0.26717742632492514
+          },
+          {
+            "port": 71,
+            "status": "UNSTABLE",
+            "current_mA": 1.9197072185661772
+          },
+          {
+            "port": 74,
+            "status": "MISMATCH",
+            "current_mA": 0.26855558096723114
+          },
+          {
+            "port": 73,
+            "status": "UNSTABLE",
+            "current_mA": 0.2681618224980008
+          },
+          {
+            "port": 15,
+            "status": "NO_CURRENT",
+            "current_mA": -0.2685965974744426
+          },
+          {
+            "port": 16,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26823565221098156
+          },
+          {
+            "port": 17,
+            "status": "NO_CURRENT",
+            "current_mA": -0.2683504984311737
+          },
+          {
+            "port": 22,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26794853666050106
+          },
+          {
+            "port": 84,
+            "status": "NO_CURRENT",
+            "current_mA": -0.016902902621855054
+          },
+          {
+            "port": 80,
+            "status": "NO_CURRENT",
+            "current_mA": -0.017337677598296845
+          },
+          {
+            "port": 83,
+            "status": "NO_CURRENT",
+            "current_mA": -0.018133397838199748
+          },
+          {
+            "port": 79,
+            "status": "MISMATCH",
+            "current_mA": 0.2681782291008854
+          },
+          {
+            "port": 82,
+            "status": "NO_CURRENT",
+            "current_mA": -0.02973286607760917
+          },
+          {
+            "port": 78,
+            "status": "MISMATCH",
+            "current_mA": 0.2677188442201167
+          },
+          {
+            "port": 81,
+            "status": "NO_CURRENT",
+            "current_mA": -0.03175908153385677
+          },
+          {
+            "port": 77,
+            "status": "MISMATCH",
+            "current_mA": 0.26749735508117467
+          },
+          {
+            "port": 27,
+            "status": "MISMATCH",
+            "current_mA": 0.2687524602018463
+          },
+          {
+            "port": 23,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26819463570377006
+          },
+          {
+            "port": 28,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26874425690040393
+          },
+          {
+            "port": 24,
+            "status": "MISMATCH",
+            "current_mA": 0.2681208059907893
+          },
+          {
+            "port": 29,
+            "status": "MISMATCH",
+            "current_mA": 0.26837510833550055
+          },
+          {
+            "port": 25,
+            "status": "MISMATCH",
+            "current_mA": 0.26798134986627026
+          },
+          {
+            "port": 26,
+            "status": "MISMATCH",
+            "current_mA": 0.268662223885981
+          },
+          {
+            "port": 30,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26865402058453874
+          },
+          {
+            "port": 104,
+            "status": "MISMATCH",
+            "current_mA": 0.26880168001050003
+          },
+          {
+            "port": 103,
+            "status": "UNSTABLE",
+            "current_mA": 0.26837510833550055
+          },
+          {
+            "port": 102,
+            "status": "UNSTABLE",
+            "current_mA": 1.9393461670937069
+          },
+          {
+            "port": 101,
+            "status": "NO_CURRENT",
+            "current_mA": 1.9360730090057978
+          },
+          {
+            "port": 34,
+            "status": "MISMATCH",
+            "current_mA": 0.26871144369463484
+          },
+          {
+            "port": 35,
+            "status": "MISMATCH",
+            "current_mA": 0.2673332890523288
+          },
+          {
+            "port": 106,
+            "status": "MISMATCH",
+            "current_mA": 0.26826026211530846
+          },
+          {
+            "port": 108,
+            "status": "NO_CURRENT",
+            "current_mA": -0.05120090595210305
+          },
+          {
+            "port": 105,
+            "status": "NO_CURRENT",
+            "current_mA": -0.2686130040773272
+          },
+          {
+            "port": 107,
+            "status": "MISMATCH",
+            "current_mA": 0.26853097106290424
+          }
+        ]
+      },
+      {
+        "phase": "cycle1_zero",
+        "command_delay_s": 0.02,
+        "all_zero": false,
+        "flagged_ports": [
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          36,
+          37,
+          39,
+          40,
+          42,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          99,
+          100,
+          101,
+          104,
+          107
+        ],
+        "max_abs_current_mA": 2.0015361707642243
+      },
+      {
+        "phase": "final_zero1",
+        "command_delay_s": 0.02,
+        "all_zero": false,
+        "flagged_ports": [
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128
+        ],
+        "max_abs_current_mA": 87.14619751187644
+      },
+      {
+        "phase": "final_zero2",
+        "command_delay_s": 0.05,
+        "all_zero": true,
+        "flagged_ports": [],
+        "max_abs_current_mA": 0.0004470799286052605
+      }
+    ],
+    "frame_count": 48,
+    "invalid_frame_count": 1,
+    "finished_at": "2026-10-20T17:29:24"
+  },
+  "paced_50ms_test": {
+    "started_at": "2026-10-20T17:29:56",
+    "test_voltage_v": 1.0,
+    "command_delay_s": 0.05,
+    "samples_per_state": 3,
+    "cycles_requested": 2,
+    "voltage_measurement": "Setpoint only; measured feedback is current",
+    "final_zero_verified": true,
+    "phases": [
+      {
+        "phase": "cycle1_1v",
+        "normal_count": 50,
+        "heater_count": 72,
+        "abnormal": [
+          {
+            "port": 49,
+            "status": "NO_CURRENT",
+            "current_mA": 1.9262535347420326
+          },
+          {
+            "port": 76,
+            "status": "UNSTABLE",
+            "current_mA": 1.9000682700386478
+          },
+          {
+            "port": 22,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26794853666050106
+          },
+          {
+            "port": 84,
+            "status": "MISMATCH",
+            "current_mA": 0.26819463570377006
+          },
+          {
+            "port": 80,
+            "status": "MISMATCH",
+            "current_mA": 0.26822744890953915
+          },
+          {
+            "port": 83,
+            "status": "MISMATCH",
+            "current_mA": 0.2684735479528081
+          },
+          {
+            "port": 79,
+            "status": "MISMATCH",
+            "current_mA": 0.2681782291008854
+          },
+          {
+            "port": 82,
+            "status": "MISMATCH",
+            "current_mA": 0.2677762673302128
+          },
+          {
+            "port": 78,
+            "status": "MISMATCH",
+            "current_mA": 0.2677188442201167
+          },
+          {
+            "port": 81,
+            "status": "MISMATCH",
+            "current_mA": 0.267284069243675
+          },
+          {
+            "port": 77,
+            "status": "UNSTABLE",
+            "current_mA": 0.26749735508117467
+          },
+          {
+            "port": 27,
+            "status": "UNSTABLE",
+            "current_mA": 1.9197072185661772
+          },
+          {
+            "port": 28,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26874425690040393
+          },
+          {
+            "port": 29,
+            "status": "MISMATCH",
+            "current_mA": 0.26837510833550055
+          },
+          {
+            "port": 26,
+            "status": "UNSTABLE",
+            "current_mA": 1.9622582737091645
+          },
+          {
+            "port": 30,
+            "status": "NO_CURRENT",
+            "current_mA": -0.26865402058453874
+          },
+          {
+            "port": 104,
+            "status": "UNSTABLE",
+            "current_mA": 2.034267751643447
+          },
+          {
+            "port": 103,
+            "status": "UNSTABLE",
+            "current_mA": 1.9589851156212368
+          },
+          {
+            "port": 106,
+            "status": "NO_CURRENT",
+            "current_mA": 0.2450941388422589
+          },
+          {
+            "port": 108,
+            "status": "NO_CURRENT",
+            "current_mA": 0.24527461147398935
+          },
+          {
+            "port": 105,
+            "status": "NO_CURRENT",
+            "current_mA": 0.018387700182910985
+          },
+          {
+            "port": 107,
+            "status": "NO_CURRENT",
+            "current_mA": 0.2453320345840855
+          }
+        ]
+      },
+      {
+        "phase": "cycle1_zero",
+        "command_delay_s": 0.05,
+        "all_zero": false,
+        "flagged_ports": [
+          23,
+          24,
+          25,
+          26,
+          29,
+          30,
+          45,
+          46,
+          47,
+          48,
+          49,
+          106,
+          107
+        ],
+        "max_abs_current_mA": 1.994989854588387
+      },
+      {
+        "phase": "final_zero1",
+        "command_delay_s": 0.05,
+        "all_zero": true,
+        "flagged_ports": [],
+        "max_abs_current_mA": 0.00045528323004752683
+      }
+    ],
+    "frame_count": 36,
+    "invalid_frame_count": 0,
+    "finished_at": "2026-10-20T17:30:28"
+  },
+  "payload_alignment_evidence": [
+    {
+      "csv_line": 33,
+      "phase": "final_zero1",
+      "sample": 2,
+      "bank": 3,
+      "codes_with_unexpected_range_nibble": [
+        {
+          "port": 115,
+          "code_hex": "f1800"
+        },
+        {
+          "port": 118,
+          "code_hex": "f1800"
+        },
+        {
+          "port": 121,
+          "code_hex": "f17ff"
+        },
+        {
+          "port": 122,
+          "code_hex": "f17ff"
+        },
+        {
+          "port": 123,
+          "code_hex": "f17ff"
+        },
+        {
+          "port": 124,
+          "code_hex": "f1800"
+        },
+        {
+          "port": 126,
+          "code_hex": "f17ff"
+        },
+        {
+          "port": 127,
+          "code_hex": "f17ff"
+        },
+        {
+          "port": 128,
+          "code_hex": "feb90"
+        }
+      ],
+      "reply_hex": "eb90b35017ff617fe217fd417fd717fdc17fdd17fd617fda17fd617fe417fcd17fd417fff17fff17fff17fff18018017fff180001800017fff180001800017fff17fff17fff17fff1800017fff17fff17fffeb90"
+    }
+  ],
+  "final_state": {
+    "zero_command_sent": true,
+    "all_128_currents_below_0_01_mA_in_3_samples": true,
+    "max_abs_current_mA": 0.00045528323004752683,
+    "all_device_connections_closed": true
+  },
+  "files": {
+    "baseline_currents": "baseline_current_samples.csv",
+    "original_test": "heater_1v_check/summary.json",
+    "raw_20ms_frames": "paced_20ms_check/raw_serial_frames.csv",
+    "raw_50ms_frames": "paced_50ms_check/raw_serial_frames.csv"
+  },
+  "scope": "0/1 V setpoints only, feedback via measured current and historical heater resistance; experiment voltages/calibration/source files unchanged."
+}
